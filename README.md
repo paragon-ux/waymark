@@ -30,27 +30,29 @@ A modern AI coding workflow requires three distinct architectural layers:
 
 ```mermaid
 flowchart TD
-    subgraph Discovery["1. Codebase Discovery & Graphing"]
-        QMD["@tobi/qmd: On-Device BM25 + Vector + AST Chunking"]
-        CBM["codebase-memory-mcp: Structural AST Graphs & Call Tracing"]
+    subgraph Discovery["1. Codebase Discovery and Graphing"]
+        QMD["@tobi/qmd (On-Device BM25 + Vector + AST Chunking)"]
+        CBM["codebase-memory-mcp (Structural AST Graphs and Call Tracing)"]
     end
 
     subgraph InFlight["2. In-Flight Continuity Ledger"]
-        WM["Waymark MCP Server: Append-Only NDJSON Journal"]
-        SpanCheck["Span Integrity & Relocation"]
-        ResumePkt["Bounded Resume Packet<br/>&lt;2,048 bytes / ~216 tokens"]
+        WM["Waymark MCP Server (Append-Only NDJSON Journal)"]
+        SpanCheck["Span Integrity and Relocation (MOVED / STALE / CROSS_BRANCH)"]
+        ResumePkt["Bounded Resume Packet (under 2,048 bytes / ~216 tokens)"]
     end
 
     subgraph LongTerm["3. Long-Term Episodic Memory"]
-        Capn["Capn Hook: Charted Q&A Knowledge Bases"]
+        Capn["Capn Hook (Charted Q&A Knowledge Bases)"]
     end
 
-    Discovery -->|Agent explores & verifies lines| WM
+    QMD -->|Agent explores and verifies lines| WM
+    CBM -->|Agent explores and verifies lines| WM
     WM --> SpanCheck
     SpanCheck -->|Context compaction triggers| ResumePkt
     ResumePkt -->|Agent resumes verified prefix| WM
     WM -->|Investigation finalized| Capn
-    Capn -.->|Future sessions query| Discovery
+    Capn -.->|Future sessions query prior charts| QMD
+    Capn -.->|Future sessions query prior charts| CBM
 ```
 
 > [!NOTE]

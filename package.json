@@ -22,8 +22,9 @@
     "test": "npm run build && node --test \"dist/test/**/*.test.js\"",
     "schema-check": "node scripts/schema-check.mjs",
     "public-check": "node scripts/public-check.mjs",
+    "mermaid-check": "node scripts/verify-mermaid.mjs",
     "benchmark": "npm run build && node scripts/benchmark.mjs",
-    "verify": "npm run build && node --test \"dist/test/**/*.test.js\" && npm run schema-check && npm run public-check"
+    "verify": "npm run build && node --test \"dist/test/**/*.test.js\" && npm run schema-check && npm run public-check && npm run mermaid-check"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
