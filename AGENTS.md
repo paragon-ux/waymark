@@ -6,6 +6,11 @@ Waymark preserves in-flight code investigations across LLM context compactions, 
 
 Follow this exact sequence for code investigations:
 
+### 0. Workspace Initialization (First Time Only)
+If `.waymark/` is not yet initialized in the repository:
+- **CLI**: `waymark init --profile recording` (or `--profile capn-cli` / `--profile none`)
+- **MCP**: `waymark_init({ profile: "recording" })`
+
 ### 1. Query Existing Knowledge (Capn Memory)
 Check if an answer is already charted before exploring:
 - **CLI**: `waymark ask "<question>"`
@@ -14,12 +19,12 @@ Check if an answer is already charted before exploring:
 
 ### 2. Begin Active Trajectory
 If unassisted exploration is needed, start tracking:
-- **CLI**: `waymark begin "<question>"`
+- **CLI**: `waymark begin "<question>"` (question <= 240 chars)
 - **MCP**: `waymark_begin({ question: "..." })`
 - Capture the returned `id` (or inspect via `waymark status --porcelain` / `waymark_status`).
 
 ### 3. Record Evidence Hops
-After inspecting each relevant code block, record a verified hop immediately:
+After inspecting each relevant code block, record a verified hop immediately (label <= 120 chars, inference <= 160 chars):
 - **CLI**: `waymark note <id> --path <file> --label <label> --start <line> --end <line> --inference "<inference>"`
 - **MCP**: `waymark_note({ trajectory_id: "<id>", path: "<file>", label: "<label>", start_line: 1, end_line: 20, inference: "..." })`
 
