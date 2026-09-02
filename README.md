@@ -29,7 +29,7 @@ A modern AI coding workflow requires three distinct architectural layers:
    - *Role:* Stores finalized, human- or agent-verified conclusions for future sessions.
 
 ```mermaid
-flowchart TD
+graph TD
     subgraph Discovery["1. Codebase Discovery and Graphing"]
         QMD["@tobi/qmd (On-Device BM25 + Vector + AST Chunking)"]
         CBM["codebase-memory-mcp (Structural AST Graphs and Call Tracing)"]
