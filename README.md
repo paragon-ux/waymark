@@ -1,6 +1,6 @@
-# Waymark ? In-Flight Continuity MCP Server for AI Coding Agents
+# ⛕ Waymark — In-Flight Continuity MCP Server for AI Coding Agents
 
-> **Empirical Continuity Benchmark:** Across multi-hop coding investigations, an agent recovering from Waymark used **96.7% fewer recovery tokens** (~216 tokens vs. 8,000+ cold re-reads) with **100% precision on relocated spans** and **zero redundant file re-inspections**?paying for itself immediately on the 1st compaction. (Reproduce via `npm run benchmark`).
+> **Empirical Continuity Benchmark:** Across multi-hop coding investigations, an agent recovering from Waymark used **96.7% fewer recovery tokens** (~216 tokens vs. 8,000+ cold re-reads) with **100% precision on relocated spans** and **zero redundant file re-inspections** — paying for itself immediately on the 1st compaction. (Reproduce via `npm run benchmark`).
 
 ---
 
@@ -23,7 +23,7 @@ Waymark installs as a native MCP server and provides a single proactive 3-rule d
 4. When finished, seal with waymark_complete to archive findings and chart into Capn.
 ```
 
-That directive is the entire integration?no forced middleware, no complex scaffolding. The model reads it and decides.
+That directive is the entire integration — no forced middleware, no complex scaffolding. The model reads it and decides.
 
 ---
 
@@ -190,12 +190,12 @@ Waymark requires calling `waymark_note` for every meaningful hop:
 
 ## Repository Map & Onboarding
 
-- `src/mcp/` ? stdio JSON-RPC MCP server, tool handlers, resources, and prompts.
-- `src/` ? dependency-free event journal, integrity scanner, and lock primitives.
-- `test/` ? 29 automated unit and integration tests.
-- `scripts/benchmark.mjs` ? reproducible empirical continuity benchmark suite.
-- `schemas/` ? strict machine-output contracts.
-- `control/` ? project state, ownership, and genuine compaction evidence ledger.
+- `src/mcp/` — stdio JSON-RPC MCP server, tool handlers, resources, and prompts.
+- `src/` — dependency-free event journal, integrity scanner, and lock primitives.
+- `test/` — 29 automated unit and integration tests.
+- `scripts/benchmark.mjs` — reproducible empirical continuity benchmark suite.
+- `schemas/` — strict machine-output contracts.
+- `control/` — project state, ownership, and genuine compaction evidence ledger.
 
 ### Build & Verify
 Requires Node.js 22+:
