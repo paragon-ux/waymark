@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.1
+
+- Added universal executable post-compaction lifecycle hook (`scripts/hooks/waymark-compact-hook.mjs`, `bin: waymark-hook`) to solve the Prompt Compaction Paradox.
+- Overhauled README architecture section with native GitHub Mermaid flowchart diagram (`flowchart TD`) and proper contextual introductions for QMD and CBM.
+- Overhauled `docs/HARNESS-COMPATIBILITY.md` detailing out-of-context process execution vs. passive prompts across Codex, Claude Code, Cursor, and custom agent loops.
+- Expanded automated unit and integration test suite to 35 tests.
+
 ## 1.4.0
 
 - Decoupled MCP servers into standalone `waymark` (in-flight continuity) and `capn-mcp` (long-term memory), preserving unified `waymark-unified` binary.

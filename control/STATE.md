@@ -25,7 +25,7 @@ Last updated: 2026-09-02.
 - The registered reload hook returned Waymark `AGENTS.md` and its SHA-256 in a
   direct executable smoke test.
 - `npm ci`, TypeScript build, Node tests, MCP test suite, schema validation, and public hygiene checks pass locally.
-- 34/34 tests pass with zero failures.
+- 35/35 tests pass with zero failures.
 - The suite covers MCP tools/lifecycle, relocation, stale and cross-branch quarantine, torn journal
   recovery, locks, serializer bounds, path safety, hook suppression, and Capn
   argv behavior.

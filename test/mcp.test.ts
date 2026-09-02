@@ -529,4 +529,85 @@ test("Waymark abandon tool cancels active trajectory cleanly", async () => {
   }
 });
 
+test("Universal post-compaction lifecycle hook script generates valid Markdown and JSON injection blocks", async () => {
+  const repo = setupTempRepo();
+  try {
+    initWorkspace(repo, "recording");
+    const hookScript = path.resolve(process.cwd(), "scripts", "hooks", "waymark-compact-hook.mjs");
+
+    // 1. Hook with no active trajectory exits cleanly
+    const emptyOutput = execFileSync(process.execPath, [hookScript, `--root=${repo}`], {
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    assert.equal(emptyOutput.trim(), "");
+
+    // 2. Start trajectory and add note
+    const server = new McpServer({
+      name: "waymark-mcp",
+      tools: WAYMARK_TOOLS,
+      resources: WAYMARK_RESOURCES,
+      prompts: WAYMARK_PROMPTS,
+    });
+    const sampleFile = path.join(repo, "auth.ts");
+    fs.writeFileSync(sampleFile, "export function verifySignature() {\n  return true;\n}\n");
+    execFileSync("git", ["add", "auth.ts"], { cwd: repo, windowsHide: true });
+    execFileSync("git", ["commit", "-m", "add auth.ts"], { cwd: repo, windowsHide: true });
+
+    const beginRes = await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 30,
+      method: "tools/call",
+      params: {
+        name: "waymark_begin",
+        arguments: { root: repo, question: "Verify webhook flow" },
+      },
+    }));
+    assert.ok(beginRes);
+    const beginData = JSON.parse(JSON.parse(beginRes).result.content[0].text);
+
+    await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 31,
+      method: "tools/call",
+      params: {
+        name: "waymark_note",
+        arguments: {
+          root: repo,
+          trajectory_id: String(beginData.id),
+          path: "auth.ts",
+          label: "signature-verifier",
+          start_line: 1,
+          end_line: 3,
+          inference: "Verifies HMAC signature safely",
+        },
+      },
+    }));
+
+    // 3. Test hook with markdown format
+    const mdOutput = execFileSync(process.execPath, [hookScript, `--root=${repo}`, "--format=markdown"], {
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    assert.match(mdOutput, /### \[Waymark\] Active Investigation Resumed Post-Compaction/);
+    assert.match(mdOutput, /Verify webhook flow/);
+    assert.match(mdOutput, /signature-verifier/);
+
+    // 4. Test hook with JSON format
+    const jsonOutput = execFileSync(process.execPath, [hookScript, `--root=${repo}`, "--format=json"], {
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    const parsed = JSON.parse(jsonOutput);
+    assert.equal(parsed.kind, "compact-resume");
+    assert.equal(parsed.status, "STAGED");
+    assert.equal(parsed.verifiedThrough, 0);
+    assert.equal(parsed.hops.length, 1);
+    assert.equal(parsed.hops[0].path, "auth.ts");
+  } finally {
+    cleanupTempRepo(repo);
+  }
+});
+
+
 

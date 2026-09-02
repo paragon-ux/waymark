@@ -17,6 +17,7 @@ Waymark exists in a lineage of projects exploring agent continuity across contex
 | **F-03** | Benchmark | Benchmark measures only naive cold start, ignoring modern indexed/graph retrieval | Medium | Add "Arm C: Indexed Discovery Baseline" (CBM / QMD) to benchmark suite | **FIXED** |
 | **F-04** | Feature | `capn_chart` MCP tool hardcoded `capn-cli` profile and dropped publication error | Low | Respect `config.profile` and forward publication errors in response | **FIXED** |
 | **F-05** | Test | `waymark_abandon` and `capn_chart` MCP tool calls lacked integration tests | Low | Add full JSON-RPC lifecycle tests in `test/mcp.test.ts` | **FIXED** |
+| **F-06** | Feature | Passive prompt rules alone get compacted away in non-Codex harnesses | High | Provide standalone universal lifecycle hook (`waymark-compact-hook.mjs`) | **FIXED** |
 | **D-01** | Documentation | `@tobi/qmd` is mentioned in one table row without architectural explanation | High | Add dedicated guide explaining QMD AST chunking, hybrid retrieval, and division of labor | **FIXED** |
 | **D-02** | Documentation | No validation or coexistence guide for structural code graphers like CBM | High | Add dedicated guide for pairing `codebase-memory-mcp` with Waymark | **FIXED** |
 | **D-03** | Compatibility | Claimed multi-harness support relies on a Codex-specific hook without harness guides | High | Add setup guide and rule templates for Claude Code, Cursor, Codex, and Antigravity | **FIXED** |
@@ -88,7 +89,7 @@ Waymark exists in a lineage of projects exploring agent continuity across contex
 ## 4. Verification Proof
 
 - **Build:** `npm run build` compiled without TypeScript errors.
-- **Unit & Integration Tests:** `34/34` tests passing (zero failures, zero regressions).
+- **Unit & Integration Tests:** `35/35` tests passing (zero failures, zero regressions).
 - **Strict Schema Check:** `npm run schema-check` passed (`events.schema.json`, `resume.schema.json`, `active.schema.json`).
-- **Public Hygiene Check:** `npm run public-check` passed across 51 repository files (zero secrets, zero private keys, zero local path leaks).
+- **Public Hygiene Check:** `npm run public-check` passed across 52 repository files (zero secrets, zero private keys, zero local path leaks).
 - **Benchmark Suite:** `npm run benchmark` completed successfully with three-arm empirical metrics.

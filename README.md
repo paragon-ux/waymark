@@ -15,30 +15,48 @@ When an AI coding agent is 6 hops deep tracing a complex issue across 5 files, c
 
 ## Architecture: The Clean Separation of Concerns
 
-Waymark is designed to operate seamlessly alongside modern discovery engines and long-term memory stores:
+A modern AI coding workflow requires three distinct architectural layers:
 
-```text
-+-------------------------------------------------------------------+
-| 1. DISCOVERY & GRAPHING: CBM / QMD                                |
-|    Structural call chains, AST chunking, semantic candidate search|
-+-------------------------------------------------------------------+
-                                  |
-                                  v (Agent verifies code block)
-+-------------------------------------------------------------------+
-| 2. IN-FLIGHT CONTINUITY: Waymark (Core)                           |
-|    Durable breadcrumbs, hashed spans, bounded <2KB resume packet  |
-+-------------------------------------------------------------------+
-                                  |
-                                  v (Trajectory completed & sealed)
-+-------------------------------------------------------------------+
-| 3. LONG-TERM MEMORY: Capn                                         |
-|    Permanent charted Q&A memory for cross-session reuse           |
-+-------------------------------------------------------------------+
+1. **Discovery & Structural Search (Stateless):**
+   - **`@tobi/qmd`**: Tobi Lütke's on-device hybrid search engine combining SQLite FTS5 (BM25 keyword search) with local vector embeddings and AST-aware code chunking.
+   - **`codebase-memory-mcp` (CBM)**: DeusData's high-performance native-C graph engine for structural call-graph tracing (`trace_path`) and Cypher-like queries.
+   - *Role:* Answers questions like *"Where is authentication handled?"* and returns candidate code snippets (1,500--4,000 tokens).
+2. **In-Flight Continuity Ledger (Stateful & Compact):**
+   - **`paragon-ux/waymark`**: A dependency-free, append-only NDJSON event journal.
+   - *Role:* Answers *"What have I proven so far in this task?"* Validates exact line spans, tracks relocated blocks (`MOVED`), isolates stale evidence (`STALE`), and outputs a bounded resume packet (<2,048 bytes / ~216 tokens) upon context compaction.
+3. **Long-Term Episodic Memory (Cross-Session):**
+   - **`CyrusNuevoDia/capn-hook`**: Durable Q&A repository memory.
+   - *Role:* Stores finalized, human- or agent-verified conclusions for future sessions.
+
+```mermaid
+flowchart TD
+    subgraph Discovery ["1. Codebase Discovery & Graphing"]
+        QMD["@tobi/qmd<br/><i>On-Device BM25 + Vector + AST Chunking</i>"]
+        CBM["codebase-memory-mcp<br/><i>Structural AST Graphs & Call Tracing</i>"]
+    end
+
+    subgraph InFlight ["2. In-Flight Continuity Ledger (Waymark)"]
+        WM["Waymark MCP Server<br/><i>Append-Only NDJSON Journal</i>"]
+        SpanCheck["Span Integrity & Relocation<br/><i>MOVED / STALE / CROSS_BRANCH</i>"]
+        ResumePkt["Bounded Resume Packet<br/><i>&lt;2,048 Bytes / ~216 Tokens</i>"]
+    end
+
+    subgraph LongTerm ["3. Long-Term Episodic Memory"]
+        Capn["Capn Hook<br/><i>Charted Q&amp;A Knowledge Bases</i>"]
+    end
+
+    Discovery -->|"Agent explores &amp; verifies lines"| WM
+    WM --> SpanCheck
+    SpanCheck -->|"Context compaction triggers"| ResumePkt
+    ResumePkt -->|"Agent resumes verified prefix"| WM
+    WM -->|"Investigation finalized (waymark_complete)"| Capn
+    Capn -.->|"Future sessions query prior charts"| Discovery
 ```
 
+### Deep-Dive Guides:
 - **[QMD Architecture & Retrieval Guide](docs/QMD-AND-DISCOVERY.md)**: On-device hybrid search, AST chunking, and division of labor.
 - **[CBM (Codebase Memory) Integration Guide](docs/INTEGRATION-CBM.md)**: Pairing DeusData's structural graph engine with Waymark.
-- **[Multi-Agent Harness Compatibility Guide](docs/HARNESS-COMPATIBILITY.md)**: Setup rules for Claude Code, Cursor, Codex, and Antigravity.
+- **[Multi-Agent Harness Compatibility Guide](docs/HARNESS-COMPATIBILITY.md)**: Out-of-context lifecycle hooks (`waymark-hook`) and rules for Claude Code, Cursor, Codex, and Antigravity.
 - **[Audit and Optimization Report](docs/AUDIT-AND-OPTIMIZATION-REPORT.md)**: Full audit ledger and empirical benchmark analysis.
 
 ---
@@ -261,6 +279,7 @@ Waymark maintains **one active trajectory per repository store** (`.waymark/acti
 - `src/`: Dependency-free event journal, integrity scanner, and lock primitives.
 - `test/`: 34 automated unit and integration tests.
 - `scripts/benchmark.mjs`: Three-arm empirical continuity benchmark suite (Cold, Indexed, Waymark).
+- `scripts/hooks/waymark-compact-hook.mjs`: Out-of-context post-compaction lifecycle hook for agent harnesses (`waymark-hook`).
 - `schemas/`: Strict machine-output contracts.
 - `control/`: Project state, ownership, and genuine compaction evidence ledger.
 
