@@ -1,14 +1,14 @@
 # Waymark: In-Flight Continuity MCP Server for AI Coding Agents
 
-> **Empirical Continuity Benchmark:** Across multi-hop coding investigations, an agent recovering from Waymark used **96.8% fewer recovery tokens** vs. Cold Exploration (~216 tokens vs. 6,675 avg cold tokens) and **85.2% fewer recovery tokens** vs. Indexed Retrieval (~216 tokens vs. 1,458 avg indexed tokens) with **100% precision on relocated spans** and **zero redundant file re-inspections**--paying for itself immediately on the 1st compaction. (Reproduce via `npm run benchmark`).
+> **Empirical Continuity Benchmark:** Across multi-hop coding investigations, an agent recovering from Waymark used **96.8% fewer recovery tokens** vs. Cold Exploration (~216 tokens vs. 6,675 avg c[...]
 
 ---
 
 ## Don't Lose Your Place When Context Compaction Hits
 
 When an AI coding agent is 6 hops deep tracing a complex issue across 5 files, context compaction eventually triggers:
-- **Without Waymark (Cold Exploration)**: In-flight discoveries are wiped. The agent re-reads the entire repository from scratch, wastes tens of thousands of tokens re-deriving the same files, or hallucinates line numbers.
-- **Without Waymark (Indexed Retrieval alone)**: Even with structural graph or semantic indexers, the agent re-runs graph queries, re-fetches 3-5 candidate functions, and loses the specific causal inferences made before compaction.
+- **Without Waymark (Cold Exploration)**: In-flight discoveries are wiped. The agent re-reads the entire repository from scratch, wastes tens of thousands of tokens re-deriving the same files, or [...]
+- **Without Waymark (Indexed Retrieval alone)**: Even with structural graph or semantic indexers, the agent re-runs graph queries, re-fetches 3-5 candidate functions, and loses the specific causal[...]
 - **With Waymark (In-Flight Continuity)**: The agent calls `waymark_resume` and immediately picks up from its verified breadcrumb trail in a single step (<820 bytes / ~216 tokens).
 
 ---
@@ -23,40 +23,38 @@ A modern AI coding workflow requires three distinct architectural layers:
    - *Role:* Answers questions like *"Where is authentication handled?"* and returns candidate code snippets (1,500--4,000 tokens).
 2. **In-Flight Continuity Ledger (Stateful & Compact):**
    - **`paragon-ux/waymark`**: A dependency-free, append-only NDJSON event journal.
-   - *Role:* Answers *"What have I proven so far in this task?"* Validates exact line spans, tracks relocated blocks (`MOVED`), isolates stale evidence (`STALE`), and outputs a bounded resume packet (<2,048 bytes / ~216 tokens) upon context compaction.
+   - *Role:* Answers *"What have I proven so far in this task?"* Validates exact line spans, tracks relocated blocks (`MOVED`), isolates stale evidence (`STALE`), and outputs a bounded resume pack[...]
 3. **Long-Term Episodic Memory (Cross-Session):**
    - **`CyrusNuevoDia/capn-hook`**: Durable Q&A repository memory.
    - *Role:* Stores finalized, human- or agent-verified conclusions for future sessions.
 
 ```mermaid
-graph TD
-    subgraph Discovery["1. Codebase Discovery and Graphing"]
-        QMD["@tobi/qmd (On-Device BM25 + Vector + AST Chunking)"]
-        CBM["codebase-memory-mcp (Structural AST Graphs and Call Tracing)"]
-    end
+flowchart TD
+  subgraph Discovery["1. Codebase Discovery and Graphing"]
+    QMD[@tobi/qmd\n(BM25 + vector + AST chunking)]
+    CBM[codebase-memory-mcp\n(structural call-graphs)]
+  end
 
-    subgraph InFlight["2. In-Flight Continuity Ledger"]
-        WM["Waymark MCP Server (Append-Only NDJSON Journal)"]
-        SpanCheck["Span Integrity and Relocation (MOVED / STALE / CROSS_BRANCH)"]
-        ResumePkt["Bounded Resume Packet (under 2,048 bytes / ~216 tokens)"]
-    end
+  subgraph InFlight["2. In-Flight Continuity Ledger"]
+    WM[Waymark MCP\n(append-only NDJSON journal)]
+    SpanCheck[Span Integrity\n(MOVED / STALE / CROSS_BRANCH)]
+    ResumePkt[Bounded Resume Packet\n(< 2,048 bytes)]
+  end
 
-    subgraph LongTerm["3. Long-Term Episodic Memory"]
-        Capn["Capn Hook (Charted Q&A Knowledge Bases)"]
-    end
+  subgraph LongTerm["3. Long-Term Episodic Memory"]
+    Capn[Capn Hook\n(charted Q&A memory)]
+  end
 
-    QMD -->|Agent explores and verifies lines| WM
-    CBM -->|Agent explores and verifies lines| WM
-    WM --> SpanCheck
-    SpanCheck -->|Context compaction triggers| ResumePkt
-    ResumePkt -->|Agent resumes verified prefix| WM
-    WM -->|Investigation finalized| Capn
-    Capn -.->|Future sessions query prior charts| QMD
-    Capn -.->|Future sessions query prior charts| CBM
+  QMD -->|Agent verifies lines| WM
+  CBM -->|Agent verifies lines| WM
+  WM --> SpanCheck
+  SpanCheck -->|on compaction| ResumePkt
+  ResumePkt -->|agent resumes verified prefix| WM
+  WM -->|finalize investigation| Capn
 ```
 
 > [!NOTE]
-> **Clarification on CBM and QMD:** Waymark does **not** bundle, vendor, or internalize `codebase-memory-mcp` (CBM) or `@tobi/qmd`. Waymark remains strictly **zero-dependency**. In our benchmarks and dynamic experiments, CBM and QMD were used externally to represent structural codebase graphing and AST-level discovery (rather than a naive cold-start file read), demonstrating that even with advanced code graphs, agents still require an in-flight continuity ledger to survive context compaction without incurring repeated re-discovery token penalties.
+> **Clarification on CBM and QMD:** Waymark does **not** bundle, vendor, or internalize `codebase-memory-mcp` (CBM) or `@tobi/qmd`. Waymark remains strictly **zero-dependency**. In our benchmarks [...]
 
 ### Deep-Dive Guides:
 - **[QMD Architecture & Retrieval Guide](docs/QMD-AND-DISCOVERY.md)**: On-device hybrid search, AST chunking, and division of labor.
@@ -227,16 +225,6 @@ When context compaction triggers, recover the verified trail without re-reading 
 }
 ```
 
-### 5. Seal & Archive Trajectory
-When finished, seal the trajectory. Waymark archives the journal and records findings:
-```json
-// Tool Call: waymark_complete
-{
-  "trajectory_id": "4b8f...2a",
-  "answer": "Webhooks verify SHA-256 HMAC signatures via timing-safe buffer comparison in verifier.ts."
-}
-```
-
 ---
 
 ## Explicit Note Discipline (A Feature, Not a Bug)
@@ -274,7 +262,7 @@ Waymark maintains **one active trajectory per repository store** (`.waymark/acti
 ## Fail-Closed Relocation & Safety Guarantees
 
 - **Relocation Window:** Waymark scans up to 2,000 lines in modified files to find exact relocated code blocks (`MOVED`).
-- **Fail-Closed Boundary:** If code moves beyond 2,000 lines, is deleted, or matches multiple locations ambiguously, Waymark halts with `STALE`. Failing closed prevents agents from hallucinating deductions on misaligned code.
+- **Fail-Closed Boundary:** If code moves beyond 2,000 lines, is deleted, or matches multiple locations ambiguously, Waymark halts with `STALE`. Failing closed prevents agents from hallucinating deduc[...]
 
 ---
 
@@ -303,4 +291,4 @@ The repository is MIT licensed with zero runtime npm dependencies.
 
 ## Internal / Operator Diagnostics (CLI)
 
-The CLI (`dist/src/cli.js` / `waymark-operator`) is an internal diagnostic tool for test runners, lock recovery, and CI verification -- not the intended interface for end users. All agent workflows should use the MCP server.
+The CLI (`dist/src/cli.js` / `waymark-operator`) is an internal diagnostic tool for test runners, lock recovery, and CI verification -- not the intended interface for end users. All agent workflo[...]
