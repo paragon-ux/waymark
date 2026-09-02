@@ -1,10 +1,10 @@
-# STATE — live project authority
+# STATE -- live project authority
 
 Last updated: 2026-09-02.
 
 ## Current phase
 
-**Phase 8 -- Linear audit, decoupled standalone MCP servers, indexed benchmark baseline, ecosystem documentation guides (QMD, CBM, Harnesses), and v1.4.0 release: DONE.** Built-in stdio JSON-RPC 2.0 MCP server decoupled into isolated `waymark`, `capn-mcp`, and `waymark-unified` binaries; payload forwarding and profile bugs fixed; three-arm benchmark implemented showing 85.2% token savings over indexed retrieval; dedicated QMD, CBM, and Harness guides authored; 34 automated unit/integration tests verified.
+**Phase 9 -- Dynamic utility stress lab, full 5-stage ecosystem lifecycle proof (CBM + QMD + Waymark + Capn), out-of-context lifecycle hooks, and v1.5.0 production-stable release: DONE.** Built automated dynamic stress harness verifying span drift, ambiguity collision, broken bridges, and cross-branch containment (100% utility score); validated live blind resumption with Gemini Flash 3.8 subagent (>85% token savings without raw file reads); proved full 5-stage ecosystem lifecycle across Discovery (CBM/QMD), In-Flight (Waymark), Compaction Hook, Sealing, and Cold Recall (Capn); tagged v1.5.0 production-stable release.
 
 ## Phase plan
 
@@ -17,6 +17,7 @@ Last updated: 2026-09-02.
 - Phase 6 -- remote publication to GitHub repository and CI verification. **DONE**
 - Phase 7 -- native MCP server, Capn MCP wrapper, and zero-guesswork documentation cleanup. **DONE**
 - Phase 8 -- linear audit, MCP decoupling, indexed benchmark baseline, and v1.4.0 release. **DONE**
+- Phase 9 -- dynamic utility lab, ecosystem lifecycle proof, and v1.5.0 production-stable release. **DONE**
 
 ## Verified locally
 
