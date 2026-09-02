@@ -1,4 +1,4 @@
-# Waymark ? Local-First Continuity MCP Server
+# Waymark - Local-First Continuity MCP Server
 
 Waymark is a local-first Model Context Protocol (MCP) server that preserves in-flight coding investigations across LLM context compactions. It records verified file-and-line evidence hops, survives context compaction in agent loops, and quarantines a trajectory when recorded code anchors diverge or cross Git branches.
 
