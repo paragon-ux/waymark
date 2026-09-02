@@ -3,15 +3,13 @@
 /**
  * Universal Post-Compaction Lifecycle Hook for AI Coding Agents
  *
- * This executable script can be registered in any agent harness (Codex, Claude Code,
- * Cursor, custom agent loops) to run immediately after context compaction.
- *
- * It reads the active Waymark trajectory, validates line relocations against Git HEAD,
- * and outputs the bounded resume block (<2,048 bytes) directly to stdout for injection
- * into the agent's fresh context window.
+ * This executable script supports multiple agent harnesses:
+ * - OpenAI Codex: Handles SessionStart (compact) JSON-RPC stdin/stdout contracts.
+ * - Antigravity (Agy): Handles PreInvocation injectSteps protocol.
+ * - Claude Code & CLI: Emits clean Markdown or structured JSON.
  *
  * Usage:
- *   node scripts/hooks/waymark-compact-hook.mjs [--format=markdown|json] [--root=<path>]
+ *   node scripts/hooks/waymark-compact-hook.mjs [--format=markdown|json|codex|agy] [--root=<path>]
  */
 
 import path from "node:path";
@@ -22,7 +20,7 @@ import { checkTrajectory } from "../../dist/src/integrity.js";
 import { serializeResume } from "../../dist/src/resumeSerializer.js";
 
 function parseFlags(argv) {
-  let format = "markdown";
+  let format = null;
   let customRoot = process.cwd();
   for (const arg of argv) {
     if (arg.startsWith("--format=")) format = arg.split("=")[1];
@@ -31,18 +29,118 @@ function parseFlags(argv) {
   return { format, customRoot };
 }
 
-function runHook() {
-  const { format, customRoot } = parseFlags(process.argv.slice(2));
-  const root = repoRoot(customRoot);
+function readStdin(timeoutMs = 100) {
+  if (process.stdin.isTTY) return Promise.resolve("");
+  return new Promise((resolve) => {
+    let data = "";
+    process.stdin.setEncoding("utf8");
 
-  const pointer = readActivePointer(root);
-  if (pointer.status === "NONE") {
-    // No active trajectory to restore
+    let timer = setTimeout(() => {
+      cleanup();
+      resolve(data.trim());
+    }, timeoutMs);
+
+    function onData(chunk) {
+      data += chunk;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        cleanup();
+        resolve(data.trim());
+      }, 50);
+    }
+
+    function onEnd() {
+      cleanup();
+      resolve(data.trim());
+    }
+
+    function cleanup() {
+      clearTimeout(timer);
+      process.stdin.removeListener("data", onData);
+      process.stdin.removeListener("end", onEnd);
+      try {
+        process.stdin.pause();
+      } catch {}
+    }
+
+    process.stdin.on("data", onData);
+    process.stdin.on("end", onEnd);
+    process.stdin.resume();
+  });
+}
+
+function parseJsonSafe(raw) {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function runHook() {
+  const { format: explicitFormat, customRoot } = parseFlags(process.argv.slice(2));
+  const rawStdin = explicitFormat ? "" : await readStdin();
+  const stdinPayload = parseJsonSafe(rawStdin);
+
+  // Auto-detect format if not explicitly forced
+  let effectiveFormat = explicitFormat;
+  let resolvedRoot = customRoot;
+
+  if (!effectiveFormat && stdinPayload) {
+    if (stdinPayload.hook_event_name === "SessionStart") {
+      effectiveFormat = "codex";
+      if (stdinPayload.cwd) resolvedRoot = stdinPayload.cwd;
+    } else if (stdinPayload.workspacePaths || stdinPayload.invocationNum !== undefined) {
+      effectiveFormat = "agy";
+      if (Array.isArray(stdinPayload.workspacePaths) && stdinPayload.workspacePaths[0]) {
+        resolvedRoot = stdinPayload.workspacePaths[0];
+      }
+    }
+  }
+
+  if (!effectiveFormat) effectiveFormat = "markdown";
+
+  // For Codex: if event is not compact and not forced, return no-op
+  if (effectiveFormat === "codex" && stdinPayload && stdinPayload.source && stdinPayload.source !== "compact") {
+    process.stdout.write("{}\n");
+    return;
+  }
+
+  let root;
+  try {
+    root = repoRoot(resolvedRoot);
+  } catch {
+    if (effectiveFormat === "codex" || effectiveFormat === "agy") {
+      process.stdout.write("{}\n");
+    }
+    return;
+  }
+
+  let pointer;
+  try {
+    pointer = readActivePointer(root);
+  } catch {
+    if (effectiveFormat === "codex" || effectiveFormat === "agy") {
+      process.stdout.write("{}\n");
+    }
+    return;
+  }
+
+  if (!pointer || pointer.status === "NONE") {
+    if (effectiveFormat === "codex" || effectiveFormat === "agy") {
+      process.stdout.write("{}\n");
+    }
     return;
   }
 
   const state = loadActiveTrajectory(root);
-  if (!state) return;
+  if (!state) {
+    if (effectiveFormat === "codex" || effectiveFormat === "agy") {
+      process.stdout.write("{}\n");
+    }
+    return;
+  }
 
   const config = readConfig(root);
   const report = checkTrajectory(root, state, config.maxRelocationWindows);
@@ -79,12 +177,12 @@ function runHook() {
     staleReasons: report.staleReasons,
   });
 
-  if (format === "json") {
+  if (effectiveFormat === "json") {
     process.stdout.write(`${JSON.stringify(resume.packet, null, 2)}\n`);
     return;
   }
 
-  // Markdown injection block for agent context
+  // Build markdown breadcrumb context
   const lines = [
     "### [Waymark] Active Investigation Resumed Post-Compaction",
     `**Question:** ${state.question}`,
@@ -112,13 +210,39 @@ function runHook() {
   lines.push("*(Continue investigation from the verified hop above using `waymark_note`)*");
   lines.push("");
 
-  process.stdout.write(`${lines.join("\n")}\n`);
+  const markdownBlock = lines.join("\n");
+
+  if (effectiveFormat === "codex") {
+    const codexOutput = {
+      hookSpecificOutput: {
+        hookEventName: "SessionStart",
+        additionalContext: markdownBlock,
+      },
+    };
+    process.stdout.write(`${JSON.stringify(codexOutput)}\n`);
+    return;
+  }
+
+  if (effectiveFormat === "agy") {
+    const agyOutput = {
+      injectSteps: [
+        {
+          ephemeralMessage: markdownBlock,
+        },
+      ],
+    };
+    process.stdout.write(`${JSON.stringify(agyOutput)}\n`);
+    return;
+  }
+
+  process.stdout.write(`${markdownBlock}\n`);
 }
 
 try {
-  runHook();
+  await runHook();
+  process.exit(0);
 } catch (err) {
-  // Hooks should fail open or output diagnostic on stderr without breaking agent startup
+  // Hooks should fail open without blocking host agent loops
   process.stderr.write(`[waymark-compact-hook] Error: ${err.message}\n`);
   process.exit(0);
 }
