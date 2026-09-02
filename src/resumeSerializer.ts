@@ -59,15 +59,23 @@ function packetSize(packet: ResumePacket): number {
 }
 
 function validateInput(input: ResumeInput): void {
+  if (!input || typeof input !== "object" || typeof input.trajectoryId !== "string" || typeof input.question !== "string" || typeof input.nextAction !== "string" || !Array.isArray(input.hops) || !Array.isArray(input.staleReasons) || input.staleReasons.some((reason) => typeof reason !== "string")) {
+    throw new WaymarkError("INVALID_RESUME", "Resume input contains unsupported values");
+  }
   if (!Number.isInteger(input.totalSteps) || input.totalSteps < 0) throw new WaymarkError("INVALID_RESUME", "totalSteps must be a nonnegative integer");
   if (!Number.isInteger(input.verifiedThrough) || input.verifiedThrough < -1) throw new WaymarkError("INVALID_RESUME", "verifiedThrough is outside the trajectory");
   if (input.totalSteps === 0 && input.verifiedThrough !== -1) throw new WaymarkError("INVALID_RESUME", "An empty trajectory has no verified hop");
   if (input.totalSteps > 0 && input.verifiedThrough >= input.totalSteps) throw new WaymarkError("INVALID_RESUME", "verifiedThrough is outside the trajectory");
-  if (input.status === "NONE") return;
+  if (input.status === "NONE") {
+    if (input.trajectoryId !== "" || input.question !== "" || input.nextAction !== "begin-trajectory" || input.hops.length !== 0 || input.staleReasons.length !== 0) throw new WaymarkError("INVALID_RESUME", "NONE packets must use canonical empty fields");
+    return;
+  }
   if (input.trajectoryId.length === 0) throw new WaymarkError("INVALID_RESUME", "active resume packets require a trajectory");
+  if (input.question.length === 0 || input.nextAction.length === 0) throw new WaymarkError("INVALID_RESUME", "active resume packets require a question and next action");
   if (input.hops.some((hop) => !Number.isInteger(hop.index) || hop.index < 0 || hop.index > input.verifiedThrough || !["FRESH", "MOVED"].includes(hop.status))) {
     throw new WaymarkError("INVALID_RESUME", "resume hops must be verified and within the trusted prefix");
   }
+  if (input.hops.some((hop) => typeof hop.path !== "string" || hop.path.length === 0 || typeof hop.label !== "string" || typeof hop.inference !== "string")) throw new WaymarkError("INVALID_RESUME", "resume hops contain invalid text");
 }
 
 function basePacket(input: ResumeInput, hops: ResumeHop[], truncated: boolean, compact = false): ResumePacket {

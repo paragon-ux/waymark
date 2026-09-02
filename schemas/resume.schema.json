@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://waymark.local/schemas/resume.schema.json",
+  "$id": "https://example.com/waymark/schemas/resume.schema.json",
   "title": "Waymark compact resume packet",
   "oneOf": [
     { "$ref": "#/definitions/none" },
@@ -13,7 +13,7 @@
       "required": ["index", "path", "label", "inference", "status"],
       "properties": {
         "index": { "type": "integer", "minimum": 0 },
-        "path": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "path": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^(?!/)(?![A-Za-z]:)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$)).+$" },
         "label": { "type": "string", "maxLength": 120 },
         "inference": { "type": "string", "maxLength": 160 },
         "status": { "enum": ["FRESH", "MOVED"] }
@@ -60,7 +60,7 @@
         "waymark": { "const": 1 },
         "kind": { "const": "compact-resume" },
         "status": { "enum": ["STAGED", "CROSS_BRANCH", "STALE"] },
-        "trajectoryId": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "trajectoryId": { "type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[a-z0-9-]{8,80}$" },
         "question": { "type": "string", "minLength": 1, "maxLength": 240 },
         "verifiedThrough": { "type": "integer", "minimum": -1 },
         "totalSteps": { "type": "integer", "minimum": 0 },

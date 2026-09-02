@@ -14,7 +14,8 @@
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test dist/test/waymark.test.js",
     "schema-check": "node scripts/schema-check.mjs",
-    "verify": "npm run build && node --test dist/test/waymark.test.js && npm run schema-check"
+    "public-check": "node scripts/public-check.mjs",
+    "verify": "npm run build && node --test dist/test/waymark.test.js && npm run schema-check && npm run public-check"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

@@ -13,27 +13,42 @@ import {
   WaymarkError,
   WaymarkEvent,
 } from "./types.js";
-import { nowIso } from "./paths.js";
+import { assertSafeWaymarkStore, normalizeRelativePath, nowIso } from "./paths.js";
 
 export const MAX_EVENT_BYTES = 16 * 1024;
 
 const decoder = new TextDecoder("utf-8", { fatal: true });
 
 function storePath(root: string): string {
+  assertSafeWaymarkStore(root);
   return path.join(root, ".waymark");
+}
+
+function assertNotSymlink(target: string): void {
+  try {
+    if (fs.lstatSync(target).isSymbolicLink()) throw new WaymarkError("WAYMARK_STORAGE_UNSAFE", `Waymark storage file is a symlink: ${path.basename(target)}`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
 }
 
 export function trajectoryPath(root: string, id: string): string {
   if (!/^[a-z0-9-]{8,80}$/u.test(id)) throw new WaymarkError("INVALID_ID", "Invalid trajectory ID");
-  return path.join(storePath(root), "trajectories", `${id}.ndjson`);
+  const target = path.join(storePath(root), "trajectories", `${id}.ndjson`);
+  assertNotSymlink(target);
+  return target;
 }
 
 function activePath(root: string): string {
-  return path.join(storePath(root), "active.json");
+  const target = path.join(storePath(root), "active.json");
+  assertNotSymlink(target);
+  return target;
 }
 
 function configPath(root: string): string {
-  return path.join(storePath(root), "config.json");
+  const target = path.join(storePath(root), "config.json");
+  assertNotSymlink(target);
+  return target;
 }
 
 function writeAll(fd: number, data: Buffer): void {
@@ -59,6 +74,7 @@ function syncDirectory(directory: string): void {
 export function atomicWriteFile(target: string, data: string | Buffer): void {
   const directory = path.dirname(target);
   fs.mkdirSync(directory, { recursive: true });
+  assertNotSymlink(target);
   const temporary = `${target}.tmp.${process.pid}.${crypto.randomUUID()}`;
   const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data, "utf8");
   let fd: number | undefined;
@@ -93,7 +109,9 @@ export function atomicWriteFile(target: string, data: string | Buffer): void {
 export function initWorkspace(root: string, profile: AdapterProfile): WaymarkConfig {
   const directory = storePath(root);
   for (const child of ["trajectories", "locks", "recordings", "archive"]) {
+    assertSafeWaymarkStore(root);
     fs.mkdirSync(path.join(directory, child), { recursive: true });
+    assertSafeWaymarkStore(root);
   }
   const config: WaymarkConfig = {
     waymark: 1,
@@ -127,41 +145,111 @@ function isRecord(value: unknown): value is { [key: string]: unknown } {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function requiredString(value: unknown, field: string): string {
-  if (typeof value !== "string" || value.length === 0) throw new WaymarkError("MALFORMED_EVENT", `Event field ${field} is invalid`);
+function exactKeys(value: { [key: string]: unknown }, allowed: readonly string[], label: string): void {
+  if (Object.keys(value).some((key) => !allowed.includes(key))) throw new WaymarkError("MALFORMED_EVENT", `${label} contains an unknown field`);
+}
+
+function requiredString(value: unknown, field: string, maximum: number, allowEmpty = false): string {
+  if (typeof value !== "string" || (!allowEmpty && value.length === 0) || Array.from(value).length > maximum) throw new WaymarkError("MALFORMED_EVENT", `Event field ${field} is invalid`);
   return value;
 }
 
-function validateEvent(value: unknown): WaymarkEvent {
-  if (!isRecord(value) || value.waymark !== 1 || typeof value.type !== "string" || typeof value.trajectoryId !== "string" || !Number.isInteger(value.sequence) || typeof value.at !== "string") {
+function validHash(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{64}$/u.test(value);
+}
+
+function validGitHash(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{7,64}$/u.test(value);
+}
+
+function validateRepository(value: unknown): void {
+  if (!isRecord(value)) throw new WaymarkError("MALFORMED_EVENT", "Event repository is invalid");
+  exactKeys(value, ["branch", "head"], "Event repository");
+  requiredString(value.branch, "repository.branch", 240);
+  if (!validGitHash(value.head)) throw new WaymarkError("MALFORMED_EVENT", "Event repository.head is invalid");
+}
+
+function validateRange(value: unknown): void {
+  if (!isRecord(value) || Object.keys(value).some((key) => !["start", "end"].includes(key)) || !Number.isInteger(value.start) || !Number.isInteger(value.end)) {
+    throw new WaymarkError("MALFORMED_EVENT", "Event range is invalid");
+  }
+  const start = value.start as number;
+  const end = value.end as number;
+  if (start < 1 || end < start) throw new WaymarkError("MALFORMED_EVENT", "Event range is invalid");
+}
+
+function validateSignature(value: unknown): void {
+  if (!isRecord(value)) throw new WaymarkError("MALFORMED_EVENT", "Event structural signature is invalid");
+  exactKeys(value, ["firstHash", "lastHash", "firstTokensPrefix", "lastTokensPrefix"], "Event structural signature");
+  if (!validHash(value.firstHash) || !validHash(value.lastHash)) throw new WaymarkError("MALFORMED_EVENT", "Event structural signature hash is invalid");
+  for (const field of ["firstTokensPrefix", "lastTokensPrefix"] as const) {
+    const tokens = value[field];
+    if (!Array.isArray(tokens) || tokens.length > 10 || tokens.some((token) => typeof token !== "string" || Array.from(token).length > 80)) {
+      throw new WaymarkError("MALFORMED_EVENT", `Event ${field} is invalid`);
+    }
+  }
+}
+
+function validateHop(value: unknown): void {
+  if (!isRecord(value)) throw new WaymarkError("MALFORMED_EVENT", "Event hop is invalid");
+  exactKeys(value, ["index", "path", "label", "inference", "range", "fileSha256", "normalizedSpanHash", "normalizedSpanLen", "spanLineCount", "structuralSignature"], "Event hop");
+  if (!Number.isInteger(value.index) || (value.index as number) < 0) throw new WaymarkError("MALFORMED_EVENT", "Event hop.index is invalid");
+  if (typeof value.path !== "string" || value.path.length === 0 || Array.from(value.path).length > 200) throw new WaymarkError("MALFORMED_EVENT", "Event hop.path is invalid");
+  try {
+    if (normalizeRelativePath(value.path) !== value.path) throw new Error("path is not normalized");
+  } catch {
+    throw new WaymarkError("MALFORMED_EVENT", "Event hop.path is not a normalized repository path");
+  }
+  requiredString(value.label, "hop.label", 120, true);
+  requiredString(value.inference, "hop.inference", 160);
+  validateRange(value.range);
+  if (!validHash(value.fileSha256) || !validHash(value.normalizedSpanHash)) throw new WaymarkError("MALFORMED_EVENT", "Event hop hash is invalid");
+  if (!Number.isInteger(value.normalizedSpanLen) || (value.normalizedSpanLen as number) < 0 || (value.normalizedSpanLen as number) > 10_000_000) throw new WaymarkError("MALFORMED_EVENT", "Event hop normalizedSpanLen is invalid");
+  const range = value.range as { start: number; end: number };
+  if (!Number.isInteger(value.spanLineCount) || (value.spanLineCount as number) < 1 || (value.spanLineCount as number) > 100_000 || (value.spanLineCount as number) !== range.end - range.start + 1) throw new WaymarkError("MALFORMED_EVENT", "Event hop spanLineCount is invalid");
+  validateSignature(value.structuralSignature);
+}
+
+function validateEvent(value: unknown, expectedId: string): WaymarkEvent {
+  if (!isRecord(value) || value.waymark !== 1 || typeof value.type !== "string" || !/^[a-z0-9-]{8,80}$/u.test(value.trajectoryId as string) || value.trajectoryId !== expectedId || !Number.isInteger(value.sequence) || (value.sequence as number) < 0 || typeof value.at !== "string" || Number.isNaN(Date.parse(value.at as string))) {
     throw new WaymarkError("MALFORMED_EVENT", "Event has invalid common fields");
   }
   const base = value as { type: string; trajectoryId: string; sequence: number; at: string };
-  if (!/^\d{4}-\d\d-\d\dT/iu.test(base.at)) throw new WaymarkError("MALFORMED_EVENT", "Event timestamp is invalid");
   switch (base.type) {
     case "trajectory.started": {
-      if (!isRecord(value.repository) || typeof value.question !== "string" || !["recording", "capn-cli", "none"].includes(value.profile as string)) throw new WaymarkError("MALFORMED_EVENT", "Invalid trajectory.started event");
+      exactKeys(value, ["waymark", "type", "trajectoryId", "sequence", "at", "profile", "question", "repository"], "trajectory.started event");
+      if (base.sequence !== 0 || typeof value.question !== "string" || value.question.length === 0 || Array.from(value.question).length > 240 || !["recording", "capn-cli", "none"].includes(value.profile as string)) throw new WaymarkError("MALFORMED_EVENT", "Invalid trajectory.started event");
+      validateRepository(value.repository);
       break;
     }
     case "hop.added": {
-      if (!isRecord(value.hop) || !Number.isInteger(value.hop.index) || typeof value.hop.path !== "string") throw new WaymarkError("MALFORMED_EVENT", "Invalid hop.added event");
+      exactKeys(value, ["waymark", "type", "trajectoryId", "sequence", "at", "hop"], "hop.added event");
+      if (base.sequence < 1) throw new WaymarkError("MALFORMED_EVENT", "Invalid hop.added sequence");
+      validateHop(value.hop);
       break;
     }
     case "trajectory.stale":
     case "trajectory.abandoned":
-      requiredString(value.reason, "reason");
+      exactKeys(value, ["waymark", "type", "trajectoryId", "sequence", "at", "reason"], `${base.type} event`);
+      requiredString(value.reason, "reason", 512);
       break;
     case "trajectory.committed":
-      requiredString(value.answer, "answer");
+      exactKeys(value, ["waymark", "type", "trajectoryId", "sequence", "at", "answer"], "trajectory.committed event");
+      requiredString(value.answer, "answer", 4000);
       break;
     case "publication.pending":
+      exactKeys(value, ["waymark", "type", "trajectoryId", "sequence", "at", "adapter"], "publication.pending event");
       if (!["recording", "capn-cli", "none"].includes(value.adapter as string)) throw new WaymarkError("MALFORMED_EVENT", "Invalid publication adapter");
       break;
     case "publication.succeeded":
+      exactKeys(value, ["waymark", "type", "trajectoryId", "sequence", "at", "adapter", "adapterOutput"], "publication.succeeded event");
       if (!["recording", "capn-cli", "none"].includes(value.adapter as string) || typeof value.adapterOutput !== "string") throw new WaymarkError("MALFORMED_EVENT", "Invalid publication.succeeded event");
+      if (Array.from(value.adapterOutput).length > 2000) throw new WaymarkError("MALFORMED_EVENT", "Invalid publication.succeeded output");
       break;
     case "publication.failed":
+      exactKeys(value, ["waymark", "type", "trajectoryId", "sequence", "at", "adapter", "reason"], "publication.failed event");
       if (!["recording", "capn-cli", "none"].includes(value.adapter as string) || typeof value.reason !== "string") throw new WaymarkError("MALFORMED_EVENT", "Invalid publication.failed event");
+      if (Array.from(value.reason).length === 0 || Array.from(value.reason).length > 2000) throw new WaymarkError("MALFORMED_EVENT", "Invalid publication.failed reason");
       break;
     default:
       throw new WaymarkError("MALFORMED_EVENT", `Unknown event type: ${base.type}`);
@@ -203,7 +291,7 @@ export function readJournalEvents(root: string, id: string): WaymarkEvent[] {
     } catch {
       throw new WaymarkError("MALFORMED_EVENT", "Journal contains invalid JSON before its final boundary");
     }
-    events.push(validateEvent(parsed));
+    events.push(validateEvent(parsed, id));
   }
   for (let index = 0; index < events.length; index += 1) {
     const event = events[index];
@@ -233,18 +321,21 @@ function applyEvent(state: TrajectoryState | undefined, event: WaymarkEvent): Tr
       return state;
     case "trajectory.stale":
       if (!state) throw new WaymarkError("ORPHAN_EVENT", "Stale event has no trajectory");
+      if (state.status !== "STAGED") throw new WaymarkError("INVALID_STATE_TRANSITION", "Only a staged trajectory can become stale");
       state.status = "STALE";
       if (!state.staleReasons.includes(event.reason)) state.staleReasons.push(event.reason);
       state.events.push(event);
       return state;
     case "trajectory.committed":
       if (!state) throw new WaymarkError("ORPHAN_EVENT", "Commit event has no trajectory");
+      if (state.status !== "STAGED" || state.hops.length === 0) throw new WaymarkError("INVALID_STATE_TRANSITION", "Only a nonempty staged trajectory can be committed");
       state.status = "COMMITTED";
       state.answer = event.answer;
       state.events.push(event);
       return state;
     case "trajectory.abandoned":
       if (!state) throw new WaymarkError("ORPHAN_EVENT", "Abandon event has no trajectory");
+      if (state.status !== "STAGED" && state.status !== "STALE") throw new WaymarkError("INVALID_STATE_TRANSITION", "Only an unfinished trajectory can be abandoned");
       state.status = "ABANDONED";
       state.events.push(event);
       return state;
@@ -252,6 +343,7 @@ function applyEvent(state: TrajectoryState | undefined, event: WaymarkEvent): Tr
     case "publication.succeeded":
     case "publication.failed":
       if (!state) throw new WaymarkError("ORPHAN_EVENT", "Publication event has no trajectory");
+      if (state.status !== "COMMITTED") throw new WaymarkError("INVALID_STATE_TRANSITION", "Publication events require a committed trajectory");
       state.events.push(event);
       return state;
   }
@@ -265,6 +357,7 @@ export function replayTrajectory(root: string, id: string): TrajectoryState {
 }
 
 export function appendEvent(root: string, event: WaymarkEvent): void {
+  validateEvent(event, event.trajectoryId);
   const line = `${JSON.stringify(event)}\n`;
   const bytes = Buffer.from(line, "utf8");
   if (bytes.length > MAX_EVENT_BYTES) throw new WaymarkError("EVENT_TOO_LARGE", "Event exceeds the 16 KiB limit");
@@ -330,12 +423,12 @@ export function readActivePointer(root: string): ActivePointer {
   try {
     const parsed: unknown = JSON.parse(fs.readFileSync(activePath(root), "utf8"));
     if (!validPointer(parsed)) throw new Error("invalid pointer");
-    if (parsed.status !== "NONE") {
-      try {
-        replayTrajectory(root, parsed.trajectoryId);
-      } catch {
-        return discoverActive(root);
-      }
+    if (parsed.status === "NONE") return discoverActive(root);
+    try {
+      const state = replayTrajectory(root, parsed.trajectoryId);
+      if (state.status !== parsed.status) return discoverActive(root);
+    } catch {
+      return discoverActive(root);
     }
     return parsed;
   } catch {

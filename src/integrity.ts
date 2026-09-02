@@ -98,12 +98,14 @@ function verifyHop(root: string, hop: HopRecord, maxWindows: number): HopCheck {
     if (candidateHash === hop.normalizedSpanHash) exact.push(range);
     if (sameSignature(structuralSignature(normalized), hop.structuralSignature)) signatureHits.push(range);
   }
+  // A bounded scan cannot establish uniqueness beyond the windows it visited.
+  // Keep the result quarantined even when one exact candidate was sampled.
+  if (scanLimited) return staleCheck(hop, `relocation scan limited to ${maxWindows} windows`, file.hash);
   if (exact.length === 1) {
     return { index: hop.index, path: hop.path, status: "MOVED", originalRange: hop.range, resolvedRange: exact[0], currentFileSha256: file.hash };
   }
   if (exact.length > 1) return staleCheck(hop, "ambiguous exact span relocation", file.hash);
   if (signatureHits.length > 0) return staleCheck(hop, "signature-only candidate; exact span is not trustworthy", file.hash);
-  if (scanLimited) return staleCheck(hop, `relocation scan limited to ${maxWindows} windows`, file.hash);
   return staleCheck(hop, "recorded span was deleted or changed", file.hash);
 }
 
@@ -116,16 +118,15 @@ export function checkTrajectory(root: string, state: TrajectoryState, maxWindows
   const changed = provenanceChanged(state.repository, current);
   const hops: HopCheck[] = state.hops.map((hop) => verifyHop(root, hop, maxWindows));
   const firstStale = hops.findIndex((hop) => hop.status === "STALE");
-  const quarantined = state.status === "STALE";
-  const verifiedThrough = quarantined ? -1 : firstStale === -1 ? hops.length - 1 : firstStale - 1;
+  const verifiedThrough = firstStale === -1 ? hops.length - 1 : firstStale - 1;
   const staleReasons = [
     ...state.staleReasons,
     ...hops.filter((hop) => hop.reason).map((hop) => `${hop.path}: ${hop.reason}`),
   ];
   if (changed) staleReasons.unshift(`repository provenance changed from ${state.repository.branch}@${state.repository.head.slice(0, 12)} to ${current.branch}@${current.head.slice(0, 12)}`);
   let status: ResumeStatus;
-  if (firstStale !== -1 || quarantined) status = "STALE";
-  else if (changed) status = "CROSS_BRANCH";
+  if (changed) status = "CROSS_BRANCH";
+  else if (firstStale !== -1 || state.status === "STALE") status = "STALE";
   else status = "STAGED";
   return {
     waymark: 1,

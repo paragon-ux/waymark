@@ -171,9 +171,9 @@ function resumeFor(state: TrajectoryState | null, report: CheckReport): ReturnTy
     trajectoryId: state.id,
     status: report.status,
     question: state.question,
-    verifiedThrough: report.status === "STALE" && state.status === "STALE" ? -1 : report.verifiedThrough,
+    verifiedThrough: report.verifiedThrough,
     totalSteps: report.totalSteps,
-    hops: report.status === "STALE" && state.status === "STALE" ? [] : trusted,
+    hops: trusted,
     nextAction,
     staleReasons: report.staleReasons,
   });

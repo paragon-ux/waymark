@@ -7,6 +7,8 @@ import { LineRange, RepositoryProvenance, StructuralSignature, WaymarkError } fr
 
 const decoder = new TextDecoder("utf-8", { fatal: true });
 
+const WAYMARK_DIRECTORIES = [".waymark", "trajectories", "locks", "recordings", "archive"] as const;
+
 export function sha256(value: Buffer | string): string {
   return crypto.createHash("sha256").update(value).digest("hex");
 }
@@ -28,6 +30,24 @@ export function repoRoot(cwd = process.cwd()): string {
     return fs.realpathSync.native(root);
   } catch {
     throw new WaymarkError("GIT_ROOT_UNAVAILABLE", "Waymark must run inside a Git repository");
+  }
+}
+
+export function assertSafeWaymarkStore(root: string): void {
+  const canonicalRoot = fs.realpathSync.native(root);
+  const store = path.join(canonicalRoot, ".waymark");
+  for (const component of WAYMARK_DIRECTORIES) {
+    const current = component === ".waymark" ? store : path.join(store, component);
+    let stat: fs.Stats;
+    try {
+      stat = fs.lstatSync(current);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    if (stat.isSymbolicLink() || !stat.isDirectory()) throw new WaymarkError("WAYMARK_STORAGE_UNSAFE", `Waymark storage component is not a real directory: ${component}`);
+    const real = fs.realpathSync.native(current);
+    if (!isInside(canonicalRoot, real)) throw new WaymarkError("WAYMARK_STORAGE_UNSAFE", `Waymark storage escapes the repository: ${component}`);
   }
 }
 

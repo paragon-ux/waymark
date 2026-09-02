@@ -9,10 +9,11 @@ import test from "node:test";
 import { Ajv as AjvClass } from "ajv";
 import addFormatsPlugin from "ajv-formats";
 import { acquireLock, recoverLock } from "../src/lock.js";
-import { initWorkspace, readJournalEvents, trajectoryPath } from "../src/journal.js";
+import { initWorkspace, loadActiveTrajectory, readJournalEvents, replayTrajectory, trajectoryPath } from "../src/journal.js";
 import { serializeResume } from "../src/resumeSerializer.js";
 import { stableStringify } from "../src/stableStringify.js";
-import { capnChartArgs } from "../src/capnAdapter.js";
+import { ask as capnAsk, capnChartArgs, publish as capnPublish } from "../src/capnAdapter.js";
+import { checkTrajectory } from "../src/integrity.js";
 
 const cliPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../src/cli.js");
 const addFormats = addFormatsPlugin as unknown as (ajv: AjvClass) => AjvClass;
@@ -29,7 +30,7 @@ function git(root: string, args: readonly string[]): string {
 function makeRepo(files: Record<string, string>): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "waymark-test-"));
   git(root, ["init", "-q"]);
-  git(root, ["config", "user.email", "waymark@example.invalid"]);
+  git(root, ["config", "user.email", "test@example.com"]);
   git(root, ["config", "user.name", "Waymark Tests"]);
   for (const [relative, contents] of Object.entries(files)) {
     const target = path.join(root, ...relative.split("/"));
@@ -87,8 +88,52 @@ test("stable stringify is deterministic, ordered, and rejects unsupported values
   assert.throws(() => stableStringify({ bad: BigInt(1) }), /unsupported value/);
 });
 
+test("resume serializer rejects noncanonical active input instead of emitting invalid JSON", () => {
+  assert.throws(() => serializeResume({
+    trajectoryId: crypto.randomUUID(),
+    status: "STAGED",
+    question: "",
+    verifiedThrough: -1,
+    totalSteps: 0,
+    hops: [],
+    nextAction: "record-first-hop",
+    staleReasons: [],
+  }), /question/iu);
+});
+
 test("Capn publication uses the public positional question/answer argv contract", () => {
-  assert.deepEqual(capnChartArgs("question", "answer", ["src/z.ts", "src/a.ts", "src/a.ts"]), ["chart", "question", "answer", "--files", "src/a.ts", "src/z.ts"]);
+  assert.deepEqual(capnChartArgs("question", "answer", ["src/z.ts", "src/a.ts", "src/a.ts"]), ["chart", "question", "answer", "--files", "src/a.ts", "--files", "src/z.ts"]);
+  assert.throws(() => capnChartArgs("question", "answer", ["src/a,b.ts"]), /comma/iu);
+});
+
+test("Capn ask recognizes the public miss response", async () => {
+  const root = makeRepo({ "src/flow.ts": "line\n" });
+  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+  const executable = process.platform === "win32"
+    ? path.join(projectRoot, "test", "fake-capn-miss.cmd")
+    : path.join(root, "fake-capn-miss.mjs");
+  if (process.platform !== "win32") {
+    fs.copyFileSync(path.join(projectRoot, "test", "fake-capn-miss.mjs"), executable);
+    fs.chmodSync(executable, 0o755);
+  }
+  const result = await capnAsk(root, "capn-cli", executable, "question");
+  assert.equal(result.status, "miss");
+});
+
+test("capn-cli adapter executes an available command without shell interpolation", { skip: process.platform !== "win32" }, async () => {
+  const root = makeRepo({ "src/flow.ts": "line\n" });
+  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+  const result = await capnPublish(root, "capn-cli", path.join(projectRoot, "test", "fake-capn.cmd"), "question", "answer", ["src/flow.ts"], "trajectory-test");
+  assert.equal(result.published, true, result.error);
+  assert.match(result.output, /chart question answer --files src\/flow\.ts/u);
+});
+
+test("Windows batch Capn publication fails closed for command-interpreter percent expansion", { skip: process.platform !== "win32" }, async () => {
+  const root = makeRepo({ "src/flow.ts": "line\n" });
+  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+  const result = await capnPublish(root, "capn-cli", path.join(projectRoot, "test", "fake-capn.cmd"), "100%PATH%", "answer", ["src/flow.ts"], "trajectory-test");
+  assert.equal(result.published, false);
+  assert.match(result.error ?? "", /CAPN_UNSAFE_ARGUMENT/iu);
 });
 
 test("resume serialization preserves the newest verified hop and the caller input", () => {
@@ -191,6 +236,47 @@ test("unrelated edits remain fresh while edits inside a span quarantine the traj
   assert.deepEqual(resume.value.hops, []);
 });
 
+test("a stale trajectory resume retains only its verified prefix", () => {
+  const root = makeRepo({ "src/flow.ts": "first();\nstable();\nsecond();\n" });
+  initialize(root);
+  const id = begin(root);
+  assert.equal(note(root, id, 1, 1).code, 0);
+  assert.equal(note(root, id, 3, 3).code, 0);
+  fs.writeFileSync(path.join(root, "src/flow.ts"), "first();\nstable();\nchanged();\n", "utf8");
+  const check = runCli(root, ["check", "--active", "--porcelain"]);
+  assert.equal(check.code, 2);
+  assert.equal(check.value.status, "STALE");
+  const packet = runCli(root, ["resume", "--compact"]);
+  assert.equal(packet.code, 2);
+  assert.equal(packet.value.status, "STALE");
+  assert.deepEqual(packet.value.hops, [{ index: 0, path: "src/flow.ts", label: "flow", inference: "This hop connects the active flow to the next layer.", status: "FRESH" }]);
+  assert.equal(packet.value.verifiedThrough, 0);
+});
+
+test("a valid NONE pointer is reconciled from an unfinished journal", () => {
+  const root = makeRepo({ "src/flow.ts": "line\n" });
+  initialize(root);
+  const id = begin(root);
+  fs.writeFileSync(path.join(root, ".waymark", "active.json"), `${JSON.stringify({ waymark: 1, status: "NONE", updatedAt: new Date().toISOString() })}\n`, "utf8");
+  const status = runCli(root, ["status", "--porcelain"]);
+  assert.equal(status.code, 0);
+  assert.equal(status.value.status, "STAGED");
+  assert.equal(status.value.trajectoryId, id);
+});
+
+test("a bounded relocation scan never claims uniqueness from a partial sample", () => {
+  const root = makeRepo({ "src/flow.ts": "target();\nother();\n" });
+  initialize(root);
+  const id = begin(root);
+  assert.equal(note(root, id, 1, 1).code, 0);
+  fs.writeFileSync(path.join(root, "src/flow.ts"), "other();\ntarget();\n", "utf8");
+  const state = loadActiveTrajectory(root);
+  assert.ok(state);
+  const report = checkTrajectory(root, state, 1);
+  assert.equal(report.status, "STALE");
+  assert.match(report.staleReasons.join(" "), /scan limited/iu);
+});
+
 test("branch changes are reported as CROSS_BRANCH even when anchors remain exact", () => {
   const root = makeRepo({ "src/flow.ts": "export function route() {\n  return service();\n}\n" });
   initialize(root);
@@ -203,6 +289,23 @@ test("branch changes are reported as CROSS_BRANCH even when anchors remain exact
   assert.equal(runCli(root, ["resume", "--compact"]).code, 2);
 });
 
+test("cross-branch provenance takes precedence over a simultaneous stale hop", () => {
+  const root = makeRepo({ "src/flow.ts": "first();\nsecond();\n" });
+  initialize(root);
+  const id = begin(root);
+  assert.equal(note(root, id, 1, 1).code, 0);
+  fs.writeFileSync(path.join(root, "src/flow.ts"), "changed();\nsecond();\n", "utf8");
+  git(root, ["switch", "-c", "alternate", "--quiet"]);
+  const result = runCli(root, ["check", "--active", "--porcelain"]);
+  assert.equal(result.code, 2);
+  assert.equal(result.value.status, "CROSS_BRANCH");
+  const hops = result.value.hops as Array<Record<string, unknown>>;
+  assert.equal(hops[0]?.status, "STALE");
+  const events = runCli(root, ["dump-trajectory", id]);
+  const eventTypes = (events.value.events as Array<Record<string, unknown>>).map((event) => event.type);
+  assert.equal(eventTypes.includes("trajectory.stale"), false);
+});
+
 test("path traversal is rejected before a hop is written", () => {
   const root = makeRepo({ "src/flow.ts": "line\n" });
   initialize(root);
@@ -210,6 +313,23 @@ test("path traversal is rejected before a hop is written", () => {
   const result = runCli(root, ["note", id, "--path", "../secret.ts", "--label", "x", "--start", "1", "--end", "1", "--inference", "bad"]);
   assert.equal(result.code, 1);
   assert.equal(result.value.code, "INVALID_PATH");
+});
+
+test("Waymark refuses a symlinked storage root", (t) => {
+  const root = makeRepo({ "src/flow.ts": "line\n" });
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "waymark-outside-"));
+  const storage = path.join(root, ".waymark");
+  try {
+    fs.symlinkSync(outside, storage, process.platform === "win32" ? "junction" : "dir");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EPERM" || code === "EACCES") {
+      t.skip("symlink creation is unavailable on this host");
+      return;
+    }
+    throw error;
+  }
+  assert.throws(() => initWorkspace(root, "recording"), /storage/iu);
 });
 
 test("hook suppression is a no-write, machine-readable no-op", () => {
@@ -255,6 +375,21 @@ test("mkdir locking returns BUSY and force recovery reclaims a dead owner", () =
   assert.equal(recovered.recovered, true);
 });
 
+test("forced lock recovery leaves a changed lock owner untouched", () => {
+  const root = makeRepo({ "src/flow.ts": "line\n" });
+  initWorkspace(root, "recording");
+  const lockDir = path.join(root, ".waymark", "locks", "active");
+  fs.mkdirSync(lockDir);
+  fs.writeFileSync(path.join(lockDir, "metadata.json"), JSON.stringify({ pid: 99999999, nodeVersion: "test", startTime: new Date().toISOString(), cwd: root, token: "old-token" }));
+  const renamed = path.join(root, ".waymark", "locks", "active.reclaim-test");
+  fs.renameSync(lockDir, renamed);
+  fs.mkdirSync(lockDir);
+  fs.writeFileSync(path.join(lockDir, "metadata.json"), JSON.stringify({ pid: process.pid, nodeVersion: "test", startTime: new Date().toISOString(), cwd: root, token: "new-token" }));
+  fs.renameSync(renamed, path.join(root, ".waymark", "locks", "active.reclaim-old"));
+  assert.throws(() => recoverLock(root, true), /still running|changed/iu);
+  assert.equal(fs.existsSync(path.join(lockDir, "metadata.json")), true);
+});
+
 test("emitted resume packets conform to the corrected schema", () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
   const schema = JSON.parse(fs.readFileSync(path.join(root, "schemas", "resume.schema.json"), "utf8")) as object;
@@ -285,7 +420,46 @@ test("journal events conform to the corrected flat event schema", () => {
   const addFormats = addFormatsPlugin as unknown as (instance: AjvClass) => AjvClass;
   addFormats(ajv);
   const validate = ajv.compile(schema);
-  for (const event of readJournalEvents(fixtureRoot, id)) {
+  const events = readJournalEvents(fixtureRoot, id);
+  for (const event of events) {
     assert.equal(validate(event), true, JSON.stringify(validate.errors));
   }
+  const hopEvent = events.find((event) => event.type === "hop.added");
+  assert.ok(hopEvent && hopEvent.type === "hop.added");
+  assert.equal(validate({ ...hopEvent, hop: { ...hopEvent.hop, path: "..\\secret" } }), false);
+});
+
+test("journal replay rejects unknown event fields and cross-trajectory IDs", () => {
+  const root = makeRepo({ "src/flow.ts": "line\n" });
+  initialize(root);
+  const id = begin(root);
+  const journal = trajectoryPath(root, id);
+  const [line] = fs.readFileSync(journal, "utf8").trimEnd().split("\n");
+  assert.ok(line);
+  const started = JSON.parse(line) as Record<string, unknown>;
+  started.unexpected = true;
+  fs.writeFileSync(journal, `${JSON.stringify(started)}\n`, "utf8");
+  assert.throws(() => readJournalEvents(root, id), /unknown field/iu);
+
+  const secondRoot = makeRepo({ "src/flow.ts": "line\n" });
+  initialize(secondRoot);
+  const secondId = begin(secondRoot);
+  const secondJournal = trajectoryPath(secondRoot, secondId);
+  const secondLine = fs.readFileSync(secondJournal, "utf8").trimEnd();
+  const secondStarted = JSON.parse(secondLine) as Record<string, unknown>;
+  secondStarted.trajectoryId = crypto.randomUUID();
+  fs.writeFileSync(secondJournal, `${JSON.stringify(secondStarted)}\n`, "utf8");
+  assert.throws(() => readJournalEvents(secondRoot, secondId), /common fields/iu);
+});
+
+test("journal replay rejects a commit after abandonment", () => {
+  const root = makeRepo({ "src/flow.ts": "line\n" });
+  initialize(root);
+  const id = begin(root);
+  assert.equal(note(root, id, 1, 1).code, 0);
+  const journal = trajectoryPath(root, id);
+  const abandoned = { waymark: 1, type: "trajectory.abandoned", trajectoryId: id, sequence: 2, at: new Date().toISOString(), reason: "operator test" };
+  const committed = { waymark: 1, type: "trajectory.committed", trajectoryId: id, sequence: 3, at: new Date().toISOString(), answer: "invalid" };
+  fs.appendFileSync(journal, `${JSON.stringify(abandoned)}\n${JSON.stringify(committed)}\n`, "utf8");
+  assert.throws(() => replayTrajectory(root, id), /staged trajectory|state transition/iu);
 });
