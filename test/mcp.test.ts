@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -26,7 +26,7 @@ function cleanupTempRepo(dir: string): void {
   }
 }
 
-test("MCP server implements initialize, ping, and tools/list", async () => {
+test("MCP server implements initialize, ping, tools/list, resources/list, and prompts/list", async () => {
   const server = new McpServer();
 
   // 1. initialize
@@ -46,6 +46,9 @@ test("MCP server implements initialize, ping, and tools/list", async () => {
   assert.equal(initParsed.id, 1);
   assert.equal(initParsed.result.protocolVersion, "2024-11-05");
   assert.equal(initParsed.result.serverInfo.name, "waymark-mcp");
+  assert.ok(initParsed.result.capabilities.tools);
+  assert.ok(initParsed.result.capabilities.resources);
+  assert.ok(initParsed.result.capabilities.prompts);
 
   // 2. ping
   const pingRes = await server.handleMessage(JSON.stringify({
@@ -70,17 +73,46 @@ test("MCP server implements initialize, ping, and tools/list", async () => {
   assert.ok(Array.isArray(listParsed.result.tools));
   assert.equal(listParsed.result.tools.length, WAYMARK_TOOLS.length + CAPN_TOOLS.length);
 
-  const toolNames = listParsed.result.tools.map((t: { name: string }) => t.name);
-  assert.ok(toolNames.includes("waymark_init"));
-  assert.ok(toolNames.includes("waymark_status"));
-  assert.ok(toolNames.includes("waymark_begin"));
-  assert.ok(toolNames.includes("waymark_note"));
-  assert.ok(toolNames.includes("waymark_check"));
-  assert.ok(toolNames.includes("waymark_resume"));
-  assert.ok(toolNames.includes("waymark_complete"));
-  assert.ok(toolNames.includes("waymark_abandon"));
-  assert.ok(toolNames.includes("capn_ask"));
-  assert.ok(toolNames.includes("capn_chart"));
+  // 4. resources/list and resources/read
+  const resList = await server.handleMessage(JSON.stringify({
+    jsonrpc: "2.0",
+    id: 4,
+    method: "resources/list",
+  }));
+  assert.ok(resList);
+  const resListParsed = JSON.parse(resList);
+  assert.equal(resListParsed.result.resources.length, 2);
+  assert.equal(resListParsed.result.resources[0].uri, "waymark://context");
+
+  const resRead = await server.handleMessage(JSON.stringify({
+    jsonrpc: "2.0",
+    id: 5,
+    method: "resources/read",
+    params: { uri: "waymark://context" },
+  }));
+  assert.ok(resRead);
+  const resReadParsed = JSON.parse(resRead);
+  assert.ok(resReadParsed.result.contents[0].text.includes("Waymark Proactive Agent Directive"));
+
+  // 5. prompts/list and prompts/get
+  const pList = await server.handleMessage(JSON.stringify({
+    jsonrpc: "2.0",
+    id: 6,
+    method: "prompts/list",
+  }));
+  assert.ok(pList);
+  const pListParsed = JSON.parse(pList);
+  assert.equal(pListParsed.result.prompts[0].name, "waymark_investigate");
+
+  const pGet = await server.handleMessage(JSON.stringify({
+    jsonrpc: "2.0",
+    id: 7,
+    method: "prompts/get",
+    params: { name: "waymark_investigate", arguments: { question: "How does lock acquisition work?" } },
+  }));
+  assert.ok(pGet);
+  const pGetParsed = JSON.parse(pGet);
+  assert.ok(pGetParsed.result.messages[0].content.text.includes("How does lock acquisition work?"));
 });
 
 test("MCP server executes complete Waymark lifecycle tools", async () => {

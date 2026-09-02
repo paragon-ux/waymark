@@ -1,4 +1,4 @@
-export interface JsonRpcRequest {
+﻿export interface JsonRpcRequest {
   jsonrpc: "2.0";
   id: string | number;
   method: string;
@@ -56,4 +56,37 @@ export interface McpToolCallResult {
 export interface McpToolHandler {
   definition: McpToolDefinition;
   handler: (args: Record<string, unknown>) => Promise<McpToolCallResult>;
+}
+
+export interface McpResourceDefinition {
+  uri: string;
+  name: string;
+  description?: string;
+  mimeType?: string;
+}
+
+export interface McpResourceContent {
+  uri: string;
+  mimeType?: string;
+  text?: string;
+}
+
+export interface McpPromptArgument {
+  name: string;
+  description?: string;
+  required?: boolean;
+}
+
+export interface McpPromptDefinition {
+  name: string;
+  description?: string;
+  arguments?: McpPromptArgument[];
+}
+
+export interface McpPromptMessage {
+  role: "user" | "assistant";
+  content: {
+    type: "text";
+    text: string;
+  };
 }
