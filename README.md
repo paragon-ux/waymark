@@ -30,27 +30,27 @@ A modern AI coding workflow requires three distinct architectural layers:
 
 ```mermaid
 flowchart TD
-    subgraph Discovery ["1. Codebase Discovery & Graphing"]
-        QMD["@tobi/qmd<br/><i>On-Device BM25 + Vector + AST Chunking</i>"]
-        CBM["codebase-memory-mcp<br/><i>Structural AST Graphs & Call Tracing</i>"]
+    subgraph Discovery["1. Codebase Discovery & Graphing"]
+        QMD["@tobi/qmd: On-Device BM25 + Vector + AST Chunking"]
+        CBM["codebase-memory-mcp: Structural AST Graphs & Call Tracing"]
     end
 
-    subgraph InFlight ["2. In-Flight Continuity Ledger (Waymark)"]
-        WM["Waymark MCP Server<br/><i>Append-Only NDJSON Journal</i>"]
-        SpanCheck["Span Integrity & Relocation<br/><i>MOVED / STALE / CROSS_BRANCH</i>"]
-        ResumePkt["Bounded Resume Packet<br/><i>&lt;2,048 Bytes / ~216 Tokens</i>"]
+    subgraph InFlight["2. In-Flight Continuity Ledger"]
+        WM["Waymark MCP Server: Append-Only NDJSON Journal"]
+        SpanCheck["Span Integrity & Relocation"]
+        ResumePkt["Bounded Resume Packet<br/>&lt;2,048 bytes / ~216 tokens"]
     end
 
-    subgraph LongTerm ["3. Long-Term Episodic Memory"]
-        Capn["Capn Hook<br/><i>Charted Q&amp;A Knowledge Bases</i>"]
+    subgraph LongTerm["3. Long-Term Episodic Memory"]
+        Capn["Capn Hook: Charted Q&A Knowledge Bases"]
     end
 
-    Discovery -->|"Agent explores &amp; verifies lines"| WM
+    Discovery -->|Agent explores & verifies lines| WM
     WM --> SpanCheck
-    SpanCheck -->|"Context compaction triggers"| ResumePkt
-    ResumePkt -->|"Agent resumes verified prefix"| WM
-    WM -->|"Investigation finalized (waymark_complete)"| Capn
-    Capn -.->|"Future sessions query prior charts"| Discovery
+    SpanCheck -->|Context compaction triggers| ResumePkt
+    ResumePkt -->|Agent resumes verified prefix| WM
+    WM -->|Investigation finalized| Capn
+    Capn -.->|Future sessions query| Discovery
 ```
 
 ### Deep-Dive Guides:
@@ -95,7 +95,7 @@ Waymark actively protects the agent against stale evidence and hallucinations:
 
 ## Model Context Protocol (MCP) Configuration
 
-Waymark runs as a native stdio JSON-RPC 2.0 MCP server with **zero runtime npm dependencies**.
+Waymark runs as a native `stdio` JSON-RPC 2.0 MCP server with **zero runtime npm dependencies**.
 
 You can run Waymark as a standalone continuity server, run Capn as a dedicated long-term memory server, or run the unified binary.
 
@@ -298,4 +298,4 @@ The repository is MIT licensed with zero runtime npm dependencies.
 
 ## Internal / Operator Diagnostics (CLI)
 
-The CLI (`dist/src/cli.js` / `waymark-operator`) is an internal diagnostic tool for test runners, lock recovery, and CI verification. All agent workflows should use the MCP server.
+The CLI (`dist/src/cli.js` / `waymark-operator`) is an internal diagnostic tool for test runners, lock recovery, and CI verification — not the intended interface for end users. All agent workflows should use the MCP server.
