@@ -32,6 +32,14 @@ signature-only candidates, missing files, and bounded-scan exhaustion are stale.
 Structural signatures are diagnostic and never authorize continuation. Any
 branch or HEAD change is `CROSS_BRANCH` and non-resumable by default.
 
+## Model Context Protocol (MCP) Contract
+
+The stdio MCP server (`waymark mcp` / `src/mcp/`) implements the standard MCP 2024-11-05 specification over JSON-RPC 2.0 with zero runtime npm dependencies.
+
+- Tool calls return structured text content containing exact JSON machine payloads.
+- `capn_ask` and `capn_chart` provide structured tool access to Capn's charted repository memory and publication interface.
+- `waymark_init`, `waymark_status`, `waymark_begin`, `waymark_note`, `waymark_check`, `waymark_resume`, `waymark_complete`, and `waymark_abandon` provide strict schema-typed access to active trajectory management with the exact same locking and integrity guarantees as the CLI.
+
 ## Output and safety
 
 Machine commands emit one JSON object on stdout; diagnostics go to stderr.
@@ -41,3 +49,5 @@ through symlinks. Lock ownership is never stolen automatically. A Windows
 batch Capn adapter rejects percent signs, quotes, newlines, and comma-containing
 file paths rather than silently altering them through `cmd.exe` or Capn's
 comma-splitting `--files` parser; direct executables have no such restriction.
+
+

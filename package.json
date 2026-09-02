@@ -5,17 +5,18 @@
   "description": "A dependency-free active investigation ledger for Codex compaction continuity.",
   "type": "module",
   "bin": {
-    "waymark": "./dist/src/cli.js"
+    "waymark": "./dist/src/cli.js",
+    "waymark-mcp": "./dist/src/mcp/index.js"
   },
   "engines": {
     "node": ">=22"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test dist/test/waymark.test.js",
+    "test": "npm run build && node --test \"dist/test/**/*.test.js\"",
     "schema-check": "node scripts/schema-check.mjs",
     "public-check": "node scripts/public-check.mjs",
-    "verify": "npm run build && node --test dist/test/waymark.test.js && npm run schema-check && npm run public-check"
+    "verify": "npm run build && node --test \"dist/test/**/*.test.js\" && npm run schema-check && npm run public-check"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

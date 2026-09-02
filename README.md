@@ -89,6 +89,36 @@ Node 22 for Linux, macOS, and Windows. `npm run public-check` is a small
 dependency-free hygiene gate for common private-key, provider-secret, and local
 machine-path leaks; it complements, rather than replaces, a full secret scanner.
 
+## Model Context Protocol (MCP)
+
+Waymark includes a built-in stdio JSON-RPC 2.0 MCP server with zero runtime npm dependencies.
+
+To register Waymark and Capn tools in Claude Desktop, Cursor, Codex, Gemini, or Antigravity, add the following to your MCP client configuration (`mcpServers` / `servers`):
+
+```json
+{
+  "mcpServers": {
+    "waymark": {
+      "command": "node",
+      "args": ["<path-to-waymark>/dist/src/mcp/index.js"]
+    }
+  }
+}
+```
+
+### Available MCP Tools:
+
+- **`capn_ask`**: Query Capn's charted memory for previously answered questions.
+- **`capn_chart`**: Direct publication of question, answer, and referenced files into Capn.
+- **`waymark_init`**: Initialize or configure the Waymark store and adapter profile.
+- **`waymark_status`**: Retrieve current active trajectory status and step count.
+- **`waymark_begin`**: Start a new durable in-flight code investigation for a question.
+- **`waymark_note`**: Record a verified code hop (`path`, `label`, `start_line`, `end_line`, `inference`).
+- **`waymark_check`**: Verify integrity against the current Git worktree.
+- **`waymark_resume`**: Retrieve the bounded compact-resume packet after context compaction.
+- **`waymark_complete`**: Seal the active trajectory, archive the journal, and publish to Capn.
+- **`waymark_abandon`**: Discard the active trajectory.
+
 ## Continuity contract
 
 The repository `AGENTS.md` is a deliberately small bootloader. After the existing
@@ -99,3 +129,4 @@ An exact normalized span can be relocated within its original file, but a
 signature-only candidate is never trusted. Branch or HEAD changes are reported as
 `CROSS_BRANCH`. See [docs/CONTINUITY-RUN.md](docs/CONTINUITY-RUN.md) for the native
 manual and automatic compaction evidence procedure.
+

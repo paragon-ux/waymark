@@ -198,18 +198,20 @@ async function runCommand(command: string, rawArgs: readonly string[]): Promise<
   const root = repoRoot();
 
   if (command === "help" || command === "--help" || command === "-h") {
-    process.stdout.write([
-      "Waymark continuity ledger",
-      "  init --profile recording|capn-cli|none",
-      "  begin <question>",
-      "  note <id> --path <file> --label <label> --start <line> --end <line> --inference <text>",
-      "  check --active --porcelain",
-      "  resume --compact",
-      "  context | ask <question> | complete <id> <answer>",
-      "  abandon <id> | status --porcelain | recover-lock --force",
-      "  dump-trajectory <id> | prune [--apply]",
-    ].join("\n") + "\n");
-    return { value: null };
+    return {
+      value: [
+        "Waymark continuity ledger",
+        "  init --profile recording|capn-cli|none",
+        "  begin <question>",
+        "  note <id> --path <file> --label <label> --start <line> --end <line> --inference <text>",
+        "  check --active --porcelain",
+        "  resume --compact",
+        "  context | ask <question> | complete <id> <answer>",
+        "  abandon <id> | status --porcelain | recover-lock --force",
+        "  dump-trajectory <id> | prune [--apply]",
+        "  mcp (starts stdio MCP server for native agent tools)",
+      ].join("\n"),
+    };
   }
 
   if (command === "init") {
@@ -376,6 +378,13 @@ async function runCommand(command: string, rawArgs: readonly string[]): Promise<
       }
       return { waymark: 1, kind: "prune", ok: true, dryRun: !parsed.flags.has("apply"), candidates: closed, moved };
     }) };
+  }
+
+  if (command === "mcp") {
+    const { McpServer } = await import("./mcp/server.js");
+    const server = new McpServer();
+    await server.runStdio();
+    return { value: null };
   }
 
   throw new WaymarkError("UNKNOWN_COMMAND", `Unknown command: ${command}`);
