@@ -12,6 +12,7 @@ import { acquireLock, recoverLock } from "../src/lock.js";
 import { initWorkspace, readJournalEvents, trajectoryPath } from "../src/journal.js";
 import { serializeResume } from "../src/resumeSerializer.js";
 import { stableStringify } from "../src/stableStringify.js";
+import { capnChartArgs } from "../src/capnAdapter.js";
 
 const cliPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../src/cli.js");
 const addFormats = addFormatsPlugin as unknown as (ajv: AjvClass) => AjvClass;
@@ -84,6 +85,10 @@ test("stable stringify is deterministic, ordered, and rejects unsupported values
   assert.equal(stableStringify(value, { top: ["hops", "a", "z"], arrayObject: ["index", "status"] }), '{"hops":[{"index":0,"status":"FRESH"}],"a":{"index":0,"status":"FRESH"},"z":1}');
   assert.throws(() => stableStringify({ bad: undefined }), /unsupported value/);
   assert.throws(() => stableStringify({ bad: BigInt(1) }), /unsupported value/);
+});
+
+test("Capn publication uses the public positional question/answer argv contract", () => {
+  assert.deepEqual(capnChartArgs("question", "answer", ["src/z.ts", "src/a.ts", "src/a.ts"]), ["chart", "question", "answer", "--files", "src/a.ts", "src/z.ts"]);
 });
 
 test("resume serialization preserves the newest verified hop and the caller input", () => {
@@ -205,6 +210,19 @@ test("path traversal is rejected before a hop is written", () => {
   const result = runCli(root, ["note", id, "--path", "../secret.ts", "--label", "x", "--start", "1", "--end", "1", "--inference", "bad"]);
   assert.equal(result.code, 1);
   assert.equal(result.value.code, "INVALID_PATH");
+});
+
+test("hook suppression is a no-write, machine-readable no-op", () => {
+  const root = makeRepo({ "src/flow.ts": "line\n" });
+  const result = execFileSync(process.execPath, [cliPath, "begin", "must not begin"], {
+    cwd: root,
+    encoding: "utf8",
+    windowsHide: true,
+    env: { ...process.env, WAYMARK_HOOK_DISABLED: "1" },
+  });
+  const parsed = JSON.parse(result.trim()) as Record<string, unknown>;
+  assert.equal(parsed.kind, "suppressed");
+  assert.equal(fs.existsSync(path.join(root, ".waymark")), false);
 });
 
 test("journal recovery truncates a torn final line and preserves forensic bytes", () => {

@@ -10,7 +10,6 @@ import {
 } from "./types.js";
 import {
   extractRange,
-  normalizeRelativePath,
   normalizedLines,
   normalizeSpan,
   readFileText,
@@ -141,8 +140,4 @@ export function checkTrajectory(root: string, state: TrajectoryState, maxWindows
     hops,
     staleReasons,
   };
-}
-
-export function validateStoredPath(root: string, storedPath: string): string {
-  return normalizeRelativePath(resolveRepositoryFile(root, storedPath).lexical === storedPath ? storedPath : storedPath);
 }

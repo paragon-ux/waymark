@@ -55,7 +55,7 @@ export function normalizeRelativePath(input: string): string {
     throw new WaymarkError("INVALID_PATH", "Path must be a nonempty repository-relative path");
   }
   const slashPath = input.replaceAll("\\", "/");
-  if (path.posix.isAbsolute(slashPath) || /^[A-Za-z]:\//u.test(slashPath)) {
+  if (path.posix.isAbsolute(slashPath) || /^[A-Za-z]:/u.test(slashPath)) {
     throw new WaymarkError("INVALID_PATH", "Absolute paths are not allowed");
   }
   const normalized = path.posix.normalize(slashPath);

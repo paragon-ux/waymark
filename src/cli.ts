@@ -8,7 +8,6 @@ import { fileURLToPath } from "node:url";
 import {
   AdapterProfile,
   CheckReport,
-  ResumeInput,
   ResumeHop,
   ResumeStatus,
   TrajectoryState,
@@ -189,6 +188,12 @@ function filesFor(state: TrajectoryState): string[] {
 }
 
 async function runCommand(command: string, rawArgs: readonly string[]): Promise<CommandResult> {
+  const suppression = process.env.WAYMARK_HOOK_DISABLED === "1"
+    ? "WAYMARK_HOOK_DISABLED"
+    : process.env.WAYMARK_HOOK_DEPTH === "1"
+      ? "WAYMARK_HOOK_DEPTH"
+      : undefined;
+  if (suppression) return { value: { waymark: 1, kind: "suppressed", ok: true, reason: suppression } };
   const parsed = parseArgs(rawArgs);
   const root = repoRoot();
 

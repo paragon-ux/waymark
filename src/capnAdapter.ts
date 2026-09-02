@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { execFile } from "node:child_process";
@@ -15,6 +14,10 @@ function digestOutput(value: string): string {
 
 function uniqueFiles(files: readonly string[]): string[] {
   return [...new Set(files)].sort();
+}
+
+export function capnChartArgs(question: string, answer: string, files: readonly string[]): string[] {
+  return ["chart", question, answer, "--files", ...uniqueFiles(files)];
 }
 
 export async function publish(
@@ -45,7 +48,7 @@ export async function publish(
   }
 
   if (!executable || executable.includes("\0")) throw new WaymarkError("CAPN_CONFIG_INVALID", "Capn executable is invalid");
-  const args = ["chart", question, answer, "--files", ...selectedFiles];
+  const args = capnChartArgs(question, answer, selectedFiles);
   try {
     const result = await execFileAsync(executable, args, {
       cwd: root,

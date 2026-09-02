@@ -111,7 +111,8 @@ export function readConfig(root: string): WaymarkConfig {
     const value = JSON.parse(fs.readFileSync(configPath(root), "utf8")) as Partial<WaymarkConfig>;
     if (value.waymark !== 1 || !["recording", "capn-cli", "none"].includes(value.profile ?? "")) throw new Error("invalid config");
     const capnExecutable = typeof value.capnExecutable === "string" && value.capnExecutable.length > 0 ? value.capnExecutable : "capn";
-    const maxRelocationWindows = Number.isInteger(value.maxRelocationWindows) && (value.maxRelocationWindows ?? 0) > 0 ? (value.maxRelocationWindows as number) : 2000;
+    const configuredWindows = Number.isInteger(value.maxRelocationWindows) && (value.maxRelocationWindows ?? 0) > 0 ? (value.maxRelocationWindows as number) : 2000;
+    const maxRelocationWindows = Math.min(configuredWindows, 2000);
     return { waymark: 1, profile: value.profile as AdapterProfile, capnExecutable, maxRelocationWindows };
   } catch {
     throw new WaymarkError("NOT_INITIALIZED", "Run waymark init before using the project");
@@ -195,6 +196,7 @@ export function readJournalEvents(root: string, id: string): WaymarkEvent[] {
   const events: WaymarkEvent[] = [];
   for (const line of text.split("\n")) {
     if (!line) continue;
+    if (Buffer.byteLength(line, "utf8") > MAX_EVENT_BYTES) throw new WaymarkError("EVENT_TOO_LARGE", "Journal contains an event over the 16 KiB limit");
     let parsed: unknown;
     try {
       parsed = JSON.parse(line);
