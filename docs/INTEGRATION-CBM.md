@@ -2,6 +2,9 @@
 
 This guide details how to integrate DeusData's `codebase-memory-mcp` (CBM) with Waymark for structural code intelligence and post-compaction continuity.
 
+> [!NOTE]
+> **Coexistence, Not Bundling:** Waymark does not bundle or embed `codebase-memory-mcp`. Waymark has zero runtime dependencies. In the ecosystem experiments and multi-MCP workflows, CBM represents the structural codebase graphing layer (BFS call-graph tracing, AST relationships) rather than a naive cold start. Waymark and CBM coexist as peer MCP servers registered side-by-side in your agent harness.
+
 ---
 
 ## 1. Architectural Overview

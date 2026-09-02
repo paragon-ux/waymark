@@ -53,6 +53,9 @@ flowchart TD
     Capn -.->|Future sessions query| Discovery
 ```
 
+> [!NOTE]
+> **Clarification on CBM and QMD:** Waymark does **not** bundle, vendor, or internalize `codebase-memory-mcp` (CBM) or `@tobi/qmd`. Waymark remains strictly **zero-dependency**. In our benchmarks and dynamic experiments, CBM and QMD were used externally to represent structural codebase graphing and AST-level discovery (rather than a naive cold-start file read), demonstrating that even with advanced code graphs, agents still require an in-flight continuity ledger to survive context compaction without incurring repeated re-discovery token penalties.
+
 ### Deep-Dive Guides:
 - **[QMD Architecture & Retrieval Guide](docs/QMD-AND-DISCOVERY.md)**: On-device hybrid search, AST chunking, and division of labor.
 - **[CBM (Codebase Memory) Integration Guide](docs/INTEGRATION-CBM.md)**: Pairing DeusData's structural graph engine with Waymark.
@@ -298,4 +301,4 @@ The repository is MIT licensed with zero runtime npm dependencies.
 
 ## Internal / Operator Diagnostics (CLI)
 
-The CLI (`dist/src/cli.js` / `waymark-operator`) is an internal diagnostic tool for test runners, lock recovery, and CI verification — not the intended interface for end users. All agent workflows should use the MCP server.
+The CLI (`dist/src/cli.js` / `waymark-operator`) is an internal diagnostic tool for test runners, lock recovery, and CI verification -- not the intended interface for end users. All agent workflows should use the MCP server.

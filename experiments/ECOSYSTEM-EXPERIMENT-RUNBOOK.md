@@ -2,6 +2,9 @@
 
 This runbook documents the dynamic multi-system experiment recreating the complete lifecycle of agentic coding memory: **Discovery (CBM / QMD) -> In-Flight Continuity (Waymark) -> Compaction Recovery (Lifecycle Hook) -> Trajectory Sealing (Capn Chart) -> Cross-Session Cold Recall (Capn Ask)**.
 
+> [!NOTE]
+> **Clarification on CBM's Role in the Experiment:** `codebase-memory-mcp` is an external tool that was integrated into the isolated test sandbox (`.sandbox/`) strictly to represent advanced structural codebase graphing (BFS call hierarchies and AST queries) rather than a naive cold-start whole-file read. This empirically proves that even when an agent utilizes an AST call-graph indexer, context compaction still forces a ~2,500-token re-discovery penalty unless paired with Waymark's in-flight continuity ledger.
+
 ---
 
 ## 1. Architectural Division of Labor
