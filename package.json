@@ -1,0 +1,25 @@
+{
+  "name": "waymark-continuity-lab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A dependency-free active investigation ledger for Codex compaction continuity.",
+  "type": "module",
+  "bin": {
+    "waymark": "./dist/src/cli.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/test/waymark.test.js",
+    "schema-check": "node scripts/schema-check.mjs",
+    "verify": "npm run build && node --test dist/test/waymark.test.js && npm run schema-check"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "typescript": "^5.8.3"
+  }
+}

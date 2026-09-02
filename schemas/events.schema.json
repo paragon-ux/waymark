@@ -1,0 +1,171 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://waymark.local/schemas/events.schema.json",
+  "title": "Waymark event journal",
+  "oneOf": [
+    { "$ref": "#/definitions/trajectoryStarted" },
+    { "$ref": "#/definitions/hopAdded" },
+    { "$ref": "#/definitions/trajectoryStale" },
+    { "$ref": "#/definitions/trajectoryCommitted" },
+    { "$ref": "#/definitions/publicationPending" },
+    { "$ref": "#/definitions/publicationSucceeded" },
+    { "$ref": "#/definitions/publicationFailed" },
+    { "$ref": "#/definitions/trajectoryAbandoned" }
+  ],
+  "definitions": {
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["branch", "head"],
+      "properties": {
+        "branch": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "head": { "type": "string", "pattern": "^[0-9a-f]{7,64}$" }
+      }
+    },
+    "lineRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start", "end"],
+      "properties": {
+        "start": { "type": "integer", "minimum": 1 },
+        "end": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["firstHash", "lastHash", "firstTokensPrefix", "lastTokensPrefix"],
+      "properties": {
+        "firstHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "lastHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "firstTokensPrefix": { "type": "array", "maxItems": 10, "items": { "type": "string", "maxLength": 80 } },
+        "lastTokensPrefix": { "type": "array", "maxItems": 10, "items": { "type": "string", "maxLength": 80 } }
+      }
+    },
+    "hop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "path", "label", "inference", "range", "fileSha256", "normalizedSpanHash", "normalizedSpanLen", "spanLineCount", "structuralSignature"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 },
+        "path": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$" },
+        "label": { "type": "string", "maxLength": 120 },
+        "inference": { "type": "string", "maxLength": 160 },
+        "range": { "$ref": "#/definitions/lineRange" },
+        "fileSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "normalizedSpanHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "normalizedSpanLen": { "type": "integer", "minimum": 0, "maximum": 10000000 },
+        "spanLineCount": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "structuralSignature": { "$ref": "#/definitions/signature" }
+      }
+    },
+    "trajectoryStarted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["waymark", "type", "trajectoryId", "sequence", "at", "profile", "question", "repository"],
+      "properties": {
+        "waymark": { "const": 1 },
+        "type": { "const": "trajectory.started" },
+        "trajectoryId": { "type": "string", "pattern": "^[a-z0-9-]{8,80}$" },
+        "sequence": { "const": 0 },
+        "at": { "type": "string", "format": "date-time" },
+        "profile": { "enum": ["recording", "capn-cli", "none"] },
+        "question": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "repository": { "$ref": "#/definitions/repository" }
+      }
+    },
+    "hopAdded": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["waymark", "type", "trajectoryId", "sequence", "at", "hop"],
+      "properties": {
+        "waymark": { "const": 1 },
+        "type": { "const": "hop.added" },
+        "trajectoryId": { "type": "string", "pattern": "^[a-z0-9-]{8,80}$" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "at": { "type": "string", "format": "date-time" },
+        "hop": { "$ref": "#/definitions/hop" }
+      }
+    },
+    "trajectoryStale": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["waymark", "type", "trajectoryId", "sequence", "at", "reason"],
+      "properties": {
+        "waymark": { "const": 1 },
+        "type": { "const": "trajectory.stale" },
+        "trajectoryId": { "type": "string", "pattern": "^[a-z0-9-]{8,80}$" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "at": { "type": "string", "format": "date-time" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 512 }
+      }
+    },
+    "trajectoryCommitted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["waymark", "type", "trajectoryId", "sequence", "at", "answer"],
+      "properties": {
+        "waymark": { "const": 1 },
+        "type": { "const": "trajectory.committed" },
+        "trajectoryId": { "type": "string", "pattern": "^[a-z0-9-]{8,80}$" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "at": { "type": "string", "format": "date-time" },
+        "answer": { "type": "string", "minLength": 1, "maxLength": 4000 }
+      }
+    },
+    "publicationPending": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["waymark", "type", "trajectoryId", "sequence", "at", "adapter"],
+      "properties": {
+        "waymark": { "const": 1 },
+        "type": { "const": "publication.pending" },
+        "trajectoryId": { "type": "string", "pattern": "^[a-z0-9-]{8,80}$" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "at": { "type": "string", "format": "date-time" },
+        "adapter": { "enum": ["recording", "capn-cli", "none"] }
+      }
+    },
+    "publicationSucceeded": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["waymark", "type", "trajectoryId", "sequence", "at", "adapter", "adapterOutput"],
+      "properties": {
+        "waymark": { "const": 1 },
+        "type": { "const": "publication.succeeded" },
+        "trajectoryId": { "type": "string", "pattern": "^[a-z0-9-]{8,80}$" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "at": { "type": "string", "format": "date-time" },
+        "adapter": { "enum": ["recording", "capn-cli", "none"] },
+        "adapterOutput": { "type": "string", "maxLength": 2000 }
+      }
+    },
+    "publicationFailed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["waymark", "type", "trajectoryId", "sequence", "at", "adapter", "reason"],
+      "properties": {
+        "waymark": { "const": 1 },
+        "type": { "const": "publication.failed" },
+        "trajectoryId": { "type": "string", "pattern": "^[a-z0-9-]{8,80}$" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "at": { "type": "string", "format": "date-time" },
+        "adapter": { "enum": ["recording", "capn-cli", "none"] },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 2000 }
+      }
+    },
+    "trajectoryAbandoned": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["waymark", "type", "trajectoryId", "sequence", "at", "reason"],
+      "properties": {
+        "waymark": { "const": 1 },
+        "type": { "const": "trajectory.abandoned" },
+        "trajectoryId": { "type": "string", "pattern": "^[a-z0-9-]{8,80}$" },
+        "sequence": { "type": "integer", "minimum": 1 },
+        "at": { "type": "string", "format": "date-time" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 512 }
+      }
+    }
+  }
+}

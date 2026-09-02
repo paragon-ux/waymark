@@ -1,0 +1,75 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://waymark.local/schemas/resume.schema.json",
+  "title": "Waymark compact resume packet",
+  "oneOf": [
+    { "$ref": "#/definitions/none" },
+    { "$ref": "#/definitions/active" }
+  ],
+  "definitions": {
+    "hop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index", "path", "label", "inference", "status"],
+      "properties": {
+        "index": { "type": "integer", "minimum": 0 },
+        "path": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "label": { "type": "string", "maxLength": 120 },
+        "inference": { "type": "string", "maxLength": 160 },
+        "status": { "enum": ["FRESH", "MOVED"] }
+      }
+    },
+    "common": {
+      "type": "object",
+      "required": ["waymark", "kind", "status", "trajectoryId", "question", "verifiedThrough", "totalSteps", "hops", "nextAction", "staleReasons", "omittedBefore", "truncated"],
+      "properties": {
+        "waymark": { "const": 1 },
+        "kind": { "const": "compact-resume" },
+        "question": { "type": "string", "maxLength": 240 },
+        "hops": { "type": "array", "maxItems": 8, "items": { "$ref": "#/definitions/hop" } },
+        "nextAction": { "type": "string", "maxLength": 160 },
+        "staleReasons": { "type": "array", "maxItems": 3, "items": { "type": "string", "maxLength": 200 } },
+        "omittedBefore": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    "none": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["waymark", "kind", "status", "trajectoryId", "question", "verifiedThrough", "totalSteps", "hops", "nextAction", "staleReasons", "omittedBefore", "truncated"],
+      "properties": {
+        "waymark": { "const": 1 },
+        "kind": { "const": "compact-resume" },
+        "status": { "const": "NONE" },
+        "trajectoryId": { "const": "" },
+        "question": { "const": "" },
+        "verifiedThrough": { "const": -1 },
+        "totalSteps": { "const": 0 },
+        "hops": { "const": [] },
+        "nextAction": { "const": "begin-trajectory" },
+        "staleReasons": { "const": [] },
+        "omittedBefore": { "const": 0 },
+        "truncated": { "const": false }
+      }
+    },
+    "active": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["waymark", "kind", "status", "trajectoryId", "question", "verifiedThrough", "totalSteps", "hops", "nextAction", "staleReasons", "omittedBefore", "truncated"],
+      "properties": {
+        "waymark": { "const": 1 },
+        "kind": { "const": "compact-resume" },
+        "status": { "enum": ["STAGED", "CROSS_BRANCH", "STALE"] },
+        "trajectoryId": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "question": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "verifiedThrough": { "type": "integer", "minimum": -1 },
+        "totalSteps": { "type": "integer", "minimum": 0 },
+        "hops": { "type": "array", "maxItems": 8, "items": { "$ref": "#/definitions/hop" } },
+        "nextAction": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "staleReasons": { "type": "array", "maxItems": 3, "items": { "type": "string", "maxLength": 200 } },
+        "omittedBefore": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean" }
+      }
+    }
+  }
+}

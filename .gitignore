@@ -1,0 +1,4 @@
+.waymark/
+dist/
+node_modules/
+evidence/runtime/
