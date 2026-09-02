@@ -1,51 +1,46 @@
 # Waymark Continuity Lab
 
-Waymark preserves in-flight code investigations across LLM context compactions, delegating finalized memory to Capn.
+Waymark is an MCP server that preserves in-flight code investigations across LLM context compactions, delegating finalized memory to Capn.
 
-## Agent Workflow Protocol
+## Primary Interface: MCP Tool Protocol
 
-Follow this exact sequence for code investigations:
+Agents interact with Waymark directly through its native MCP tools:
 
-### 0. Workspace Initialization (First Time Only)
-If `.waymark/` is not yet initialized in the repository:
-- **CLI**: `waymark init --profile recording` (or `--profile capn-cli` / `--profile none`)
-- **MCP**: `waymark_init({ profile: "recording" })`
+### 0. Initialization (`waymark_init`)
+If the repository store is not yet initialized:
+- Call `waymark_init({ profile: "recording" })` (or `profile: "capn-cli"`).
 
-### 1. Query Existing Knowledge (Capn Memory)
-Check if an answer is already charted before exploring:
-- **CLI**: `waymark ask "<question>"`
-- **MCP**: `capn_ask({ question: "..." })`
+### 1. Check Existing Knowledge (`capn_ask`)
+Query Capn's charted memory before starting a new investigation:
+- Call `capn_ask({ question: "<question>" })`.
 - If `status: "hit"`, reuse the charted answer without redundant exploration.
 
-### 2. Begin Active Trajectory
-If unassisted exploration is needed, start tracking:
-- **CLI**: `waymark begin "<question>"` (question <= 240 chars)
-- **MCP**: `waymark_begin({ question: "..." })`
-- Capture the returned `id` (or inspect via `waymark status --porcelain` / `waymark_status`).
+### 2. Begin Active Trajectory (`waymark_begin`)
+Start tracking a new in-flight investigation:
+- Call `waymark_begin({ question: "<question>" })` (max 240 chars).
+- Note the returned `id` (or inspect via `waymark_status()`).
 
-### 3. Record Evidence Hops
-After inspecting each relevant code block, record a verified hop immediately (label <= 120 chars, inference <= 160 chars):
-- **CLI**: `waymark note <id> --path <file> --label <label> --start <line> --end <line> --inference "<inference>"`
-- **MCP**: `waymark_note({ trajectory_id: "<id>", path: "<file>", label: "<label>", start_line: 1, end_line: 20, inference: "..." })`
+### 3. Record Evidence Hops (`waymark_note`)
+After inspecting each relevant code block, record a verified hop immediately:
+- Call `waymark_note({ trajectory_id: "<id>", path: "<file>", label: "<label>", start_line: <start>, end_line: <end>, inference: "<inference>" })`.
+- Limits: `label` $\le 120$ chars, `inference` $\le 160$ chars.
 
-### 4. Post-Compaction Recovery & Integrity Checks
-At startup, after context compaction, or before taking decisions:
-- **CLI**: `waymark check --active --porcelain` followed by `waymark resume --compact`
-- **MCP**: `waymark_check()` followed by `waymark_resume()`
+### 4. Post-Compaction Recovery (`waymark_check` & `waymark_resume`)
+At startup, after context compaction, or before making conclusions:
+- Call `waymark_check()` to verify worktree integrity against current Git HEAD.
+- Call `waymark_resume()` to retrieve the bounded resume packet.
 - Rely **only** on the verified prefix (`verifiedThrough`).
 - Treat `STALE` and `CROSS_BRANCH` as non-resumable (reverify the broken hop or abandon and restart).
 - Do not broadly reread the entire repository to reconstruct lost context.
 
-### 5. Complete & Chart to Capn
+### 5. Complete & Chart to Capn (`waymark_complete`)
 When the investigation is conclusive, seal the trajectory:
-- **CLI**: `waymark complete <id> "<synthesized-answer>"`
-- **MCP**: `waymark_complete({ trajectory_id: "<id>", answer: "..." })`
-- This seals the active journal, archives the trajectory, and automatically publishes the question, answer, and referenced files into Capn.
+- Call `waymark_complete({ trajectory_id: "<id>", answer: "<synthesized-answer>" })`.
+- This seals the journal, archives the trajectory, and automatically publishes the findings to Capn.
 
 ---
 
-## Tooling Interfaces
+## Secondary / Operator Tooling
 
-- **Native MCP Tools**: Run `node dist/src/mcp/index.js` or `waymark mcp` to expose `waymark_*` and `capn_*` JSON-RPC tools.
-- **CLI**: Run `node dist/src/cli.js <command>` or `waymark <command>`.
-- **Compaction Hook**: The `codex-agents-compact-reload` hook automatically reloads this file on post-compaction session start.
+The CLI (`node dist/src/cli.js` / `waymark-operator`) is internal plumbing for operator maintenance, test suites, and scripting. All agent interactions should use the MCP server (`waymark` / `node dist/src/mcp/index.js`).
+

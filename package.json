@@ -4,9 +4,11 @@
   "private": true,
   "description": "A dependency-free active investigation ledger for Codex compaction continuity.",
   "type": "module",
+  "main": "./dist/src/mcp/index.js",
   "bin": {
-    "waymark": "./dist/src/cli.js",
-    "waymark-mcp": "./dist/src/mcp/index.js"
+    "waymark": "./dist/src/mcp/index.js",
+    "waymark-server": "./dist/src/mcp/index.js",
+    "waymark-operator": "./dist/src/cli.js"
   },
   "engines": {
     "node": ">=22"
