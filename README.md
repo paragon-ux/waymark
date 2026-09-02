@@ -28,31 +28,6 @@ A modern AI coding workflow requires three distinct architectural layers:
    - **`CyrusNuevoDia/capn-hook`**: Durable Q&A repository memory.
    - *Role:* Stores finalized, human- or agent-verified conclusions for future sessions.
 
-```mermaid
-flowchart TD
-  subgraph Discovery["1. Codebase Discovery and Graphing"]
-    QMD[@tobi/qmd\n(BM25 + vector + AST chunking)]
-    CBM[codebase-memory-mcp\n(structural call-graphs)]
-  end
-
-  subgraph InFlight["2. In-Flight Continuity Ledger"]
-    WM[Waymark MCP\n(append-only NDJSON journal)]
-    SpanCheck[Span Integrity\n(MOVED / STALE / CROSS_BRANCH)]
-    ResumePkt[Bounded Resume Packet\n(< 2,048 bytes)]
-  end
-
-  subgraph LongTerm["3. Long-Term Episodic Memory"]
-    Capn[Capn Hook\n(charted Q&A memory)]
-  end
-
-  QMD -->|Agent verifies lines| WM
-  CBM -->|Agent verifies lines| WM
-  WM --> SpanCheck
-  SpanCheck -->|on compaction| ResumePkt
-  ResumePkt -->|agent resumes verified prefix| WM
-  WM -->|finalize investigation| Capn
-```
-
 > [!NOTE]
 > **Clarification on CBM and QMD:** Waymark does **not** bundle, vendor, or internalize `codebase-memory-mcp` (CBM) or `@tobi/qmd`. Waymark remains strictly **zero-dependency**. In our benchmarks [...]
 
