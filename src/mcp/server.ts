@@ -9,9 +9,9 @@ import {
   McpToolHandler,
 } from "./types.js";
 import { repoRoot } from "../paths.js";
-import { loadActiveTrajectory, readActivePointer } from "../journal.js";
+import { loadActiveTrajectory, readActivePointer, readConfig } from "../journal.js";
 
-const WAYMARK_RESOURCES: McpResourceDefinition[] = [
+export const WAYMARK_RESOURCES: McpResourceDefinition[] = [
   {
     uri: "waymark://context",
     name: "Waymark Proactive Agent Context",
@@ -26,7 +26,16 @@ const WAYMARK_RESOURCES: McpResourceDefinition[] = [
   },
 ];
 
-const WAYMARK_PROMPTS: McpPromptDefinition[] = [
+export const CAPN_RESOURCES: McpResourceDefinition[] = [
+  {
+    uri: "capn://status",
+    name: "Capn Memory Status",
+    description: "Current Capn adapter profile and executable configuration",
+    mimeType: "application/json",
+  },
+];
+
+export const WAYMARK_PROMPTS: McpPromptDefinition[] = [
   {
     name: "waymark_investigate",
     description: "Initiate a proactive code investigation adhering to Waymark in-flight continuity",
@@ -40,12 +49,39 @@ const WAYMARK_PROMPTS: McpPromptDefinition[] = [
   },
 ];
 
+export interface McpServerOptions {
+  name?: string;
+  version?: string;
+  tools?: McpToolHandler[];
+  resources?: McpResourceDefinition[];
+  prompts?: McpPromptDefinition[];
+}
+
 export class McpServer {
   private readonly toolMap: Map<string, McpToolHandler> = new Map();
+  private readonly serverName: string;
+  private readonly serverVersion: string;
+  private readonly resources: McpResourceDefinition[];
+  private readonly prompts: McpPromptDefinition[];
 
-  constructor(handlers: McpToolHandler[] = [...WAYMARK_TOOLS, ...CAPN_TOOLS]) {
-    for (const item of handlers) {
-      this.toolMap.set(item.definition.name, item);
+  constructor(optionsOrHandlers: McpServerOptions | McpToolHandler[] = [...WAYMARK_TOOLS, ...CAPN_TOOLS]) {
+    if (Array.isArray(optionsOrHandlers)) {
+      this.serverName = "waymark-mcp";
+      this.serverVersion = "1.3.0";
+      this.resources = WAYMARK_RESOURCES;
+      this.prompts = WAYMARK_PROMPTS;
+      for (const item of optionsOrHandlers) {
+        this.toolMap.set(item.definition.name, item);
+      }
+    } else {
+      this.serverName = optionsOrHandlers.name ?? "waymark-mcp";
+      this.serverVersion = optionsOrHandlers.version ?? "1.3.0";
+      const tools = optionsOrHandlers.tools ?? [...WAYMARK_TOOLS, ...CAPN_TOOLS];
+      this.resources = optionsOrHandlers.resources ?? WAYMARK_RESOURCES;
+      this.prompts = optionsOrHandlers.prompts ?? WAYMARK_PROMPTS;
+      for (const item of tools) {
+        this.toolMap.set(item.definition.name, item);
+      }
     }
   }
 
@@ -104,8 +140,8 @@ export class McpServer {
         result: {
           protocolVersion: "2024-11-05",
           serverInfo: {
-            name: "waymark-mcp",
-            version: "1.3.0",
+            name: this.serverName,
+            version: this.serverVersion,
           },
           capabilities: {
             tools: {},
@@ -175,7 +211,7 @@ export class McpServer {
         jsonrpc: "2.0",
         id,
         result: {
-          resources: WAYMARK_RESOURCES,
+          resources: this.resources,
         },
       };
     }
@@ -261,6 +297,38 @@ export class McpServer {
         };
       }
 
+      if (uri === "capn://status") {
+        let capnObj = {
+          waymark: 1,
+          kind: "capn-status",
+          profile: "recording",
+          capnExecutable: "capn",
+        };
+        try {
+          const config = readConfig(root);
+          capnObj = {
+            waymark: 1,
+            kind: "capn-status",
+            profile: config.profile,
+            capnExecutable: config.capnExecutable || "capn",
+          };
+        } catch {}
+
+        return {
+          jsonrpc: "2.0",
+          id,
+          result: {
+            contents: [
+              {
+                uri,
+                mimeType: "application/json",
+                text: JSON.stringify(capnObj, null, 2),
+              },
+            ],
+          },
+        };
+      }
+
       return {
         jsonrpc: "2.0",
         id,
@@ -276,7 +344,7 @@ export class McpServer {
         jsonrpc: "2.0",
         id,
         result: {
-          prompts: WAYMARK_PROMPTS,
+          prompts: this.prompts,
         },
       };
     }

@@ -1,7 +1,7 @@
 import { repoRoot } from "../paths.js";
 import { ask, publish } from "../capnAdapter.js";
 import { readConfig } from "../journal.js";
-import { WaymarkError } from "../types.js";
+import { AdapterProfile, WaymarkError } from "../types.js";
 import { McpToolCallResult, McpToolHandler } from "./types.js";
 
 function jsonResult(value: unknown, isError = false): McpToolCallResult {
@@ -56,13 +56,20 @@ export const capnAskTool: McpToolHandler = {
       const config = readConfig(root);
       const executable = (typeof args.capn_executable === "string" && args.capn_executable.trim()) || config.capnExecutable || "capn";
       const result = await ask(root, config.profile, executable, question);
-      return jsonResult({
+      const payload: Record<string, unknown> = {
         waymark: 1,
         kind: "ask",
         provider: result.provider,
         status: result.status,
-        matches: result.matches,
-      });
+      };
+      if (result.status === "hit") {
+        payload.result = result.result;
+      } else if (result.status === "error") {
+        payload.error = result.error;
+      } else {
+        payload.matches = result.matches ?? [];
+      }
+      return jsonResult(payload);
     } catch (error) {
       return errorResult(error);
     }
@@ -111,15 +118,20 @@ export const capnChartTool: McpToolHandler = {
       if (!answer) throw new WaymarkError("MISSING_ARGUMENT", "answer is required");
 
       const config = readConfig(root);
+      const profile = (typeof args.profile === "string" && ["recording", "capn-cli", "none"].includes(args.profile) ? args.profile : config.profile) as AdapterProfile;
       const executable = (typeof args.capn_executable === "string" && args.capn_executable.trim()) || config.capnExecutable || "capn";
-      const result = await publish(root, "capn-cli", executable, question, answer, files, "manual-mcp-chart");
-      return jsonResult({
+      const result = await publish(root, profile, executable, question, answer, files, "manual-mcp-chart");
+      const payload: Record<string, unknown> = {
         waymark: 1,
         kind: "chart",
         published: result.published,
         adapter: result.adapter,
         output: result.output,
-      });
+      };
+      if (!result.published && result.error) {
+        payload.error = result.error;
+      }
+      return jsonResult(payload);
     } catch (error) {
       return errorResult(error);
     }

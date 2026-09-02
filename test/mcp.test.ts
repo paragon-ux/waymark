@@ -1,11 +1,12 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
-import { McpServer } from "../src/mcp/server.js";
+import { CAPN_RESOURCES, McpServer, WAYMARK_PROMPTS, WAYMARK_RESOURCES } from "../src/mcp/server.js";
 import { WAYMARK_TOOLS } from "../src/mcp/waymarkTools.js";
 import { CAPN_TOOLS } from "../src/mcp/capnTools.js";
+import { initWorkspace, writeConfig } from "../src/journal.js";
 
 function setupTempRepo(): string {
   const tempDir = fs.mkdtempSync(path.join(process.cwd(), ".tmp-mcp-test-"));
@@ -293,3 +294,239 @@ test("MCP server error handling returns standard JSON-RPC codes", async () => {
   const err3 = JSON.parse(errRes3);
   assert.equal(err3.error.code, -32601);
 });
+
+test("Standalone Waymark MCP server isolates waymark tools and resources", async () => {
+  const server = new McpServer({
+    name: "waymark-mcp",
+    tools: WAYMARK_TOOLS,
+    resources: WAYMARK_RESOURCES,
+    prompts: WAYMARK_PROMPTS,
+  });
+
+  const toolsRes = await server.handleMessage(JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/list",
+  }));
+  assert.ok(toolsRes);
+  const toolsParsed = JSON.parse(toolsRes);
+  assert.equal(toolsParsed.result.tools.length, WAYMARK_TOOLS.length);
+  for (const tool of toolsParsed.result.tools) {
+    assert.match(tool.name, /^waymark_/);
+  }
+
+  const resRes = await server.handleMessage(JSON.stringify({
+    jsonrpc: "2.0",
+    id: 2,
+    method: "resources/list",
+  }));
+  assert.ok(resRes);
+  const resParsed = JSON.parse(resRes);
+  assert.equal(resParsed.result.resources.length, 2);
+  assert.equal(resParsed.result.resources[0].uri, "waymark://context");
+  assert.equal(resParsed.result.resources[1].uri, "waymark://status");
+});
+
+test("Standalone Capn MCP server isolates capn tools and resources", async () => {
+  const repo = setupTempRepo();
+  try {
+    initWorkspace(repo, "recording");
+    const server = new McpServer({
+      name: "capn-mcp",
+      tools: CAPN_TOOLS,
+      resources: CAPN_RESOURCES,
+      prompts: [],
+    });
+
+    const toolsRes = await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/list",
+    }));
+    assert.ok(toolsRes);
+    const toolsParsed = JSON.parse(toolsRes);
+    assert.equal(toolsParsed.result.tools.length, CAPN_TOOLS.length);
+    assert.equal(toolsParsed.result.tools[0].name, "capn_ask");
+    assert.equal(toolsParsed.result.tools[1].name, "capn_chart");
+
+    const resRes = await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "resources/list",
+    }));
+    assert.ok(resRes);
+    const resParsed = JSON.parse(resRes);
+    assert.equal(resParsed.result.resources.length, 1);
+    assert.equal(resParsed.result.resources[0].uri, "capn://status");
+
+    const readRes = await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "resources/read",
+      params: { uri: "capn://status" },
+    }));
+    assert.ok(readRes);
+    const readParsed = JSON.parse(readRes);
+    const statusData = JSON.parse(readParsed.result.contents[0].text);
+    assert.equal(statusData.kind, "capn-status");
+  } finally {
+    cleanupTempRepo(repo);
+  }
+});
+
+test("Capn ask MCP tool forwards charted hit payload and miss matches", async () => {
+  const repo = setupTempRepo();
+  try {
+    initWorkspace(repo, "recording");
+    const server = new McpServer({
+      name: "capn-mcp",
+      tools: CAPN_TOOLS,
+      resources: CAPN_RESOURCES,
+      prompts: [],
+    });
+
+    // 1. Initial ask on empty recording repo -> miss with matches array
+    const missRes = await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "capn_ask",
+        arguments: { root: repo, question: "How does authentication work?" },
+      },
+    }));
+    assert.ok(missRes);
+    const missParsed = JSON.parse(missRes);
+    const missData = JSON.parse(missParsed.result.content[0].text);
+    assert.equal(missData.status, "miss");
+    assert.deepEqual(missData.matches, []);
+
+    // 2. Ask with a simulated hit via fake-capn script
+    const fakeScript = process.platform === "win32"
+      ? path.resolve(process.cwd(), "test", "fake-capn.cmd")
+      : path.resolve(process.cwd(), "test", "fake-capn-miss.mjs");
+
+    if (process.platform === "win32") {
+      writeConfig(repo, { waymark: 1, profile: "capn-cli", capnExecutable: fakeScript, maxRelocationWindows: 2000 });
+      const hitRes = await server.handleMessage(JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: {
+          name: "capn_ask",
+          arguments: {
+            root: repo,
+            question: "How does authentication work?",
+            capn_executable: fakeScript,
+          },
+        },
+      }));
+      assert.ok(hitRes);
+      const hitParsed = JSON.parse(hitRes);
+      const hitData = JSON.parse(hitParsed.result.content[0].text);
+      assert.equal(hitData.status, "hit");
+      assert.ok(hitData.result, "Expected result field in hit response");
+      assert.ok(String(hitData.result).includes("How does authentication work"));
+    }
+  } finally {
+    cleanupTempRepo(repo);
+  }
+});
+
+test("Capn chart MCP tool records publication in recording profile", async () => {
+  const repo = setupTempRepo();
+  try {
+    initWorkspace(repo, "recording");
+    const server = new McpServer({
+      name: "capn-mcp",
+      tools: CAPN_TOOLS,
+      resources: CAPN_RESOURCES,
+      prompts: [],
+    });
+
+    const chartRes = await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 10,
+      method: "tools/call",
+      params: {
+        name: "capn_chart",
+        arguments: {
+          root: repo,
+          question: "How does caching work?",
+          answer: "Caching uses in-memory LRU with 5 minute TTL.",
+          files: ["sample.ts"],
+        },
+      },
+    }));
+    assert.ok(chartRes);
+    const chartParsed = JSON.parse(chartRes);
+    const chartData = JSON.parse(chartParsed.result.content[0].text);
+    assert.equal(chartData.kind, "chart");
+    assert.equal(chartData.published, true);
+    assert.equal(chartData.adapter, "recording");
+    assert.match(chartData.output, /^recorded:/);
+  } finally {
+    cleanupTempRepo(repo);
+  }
+});
+
+test("Waymark abandon tool cancels active trajectory cleanly", async () => {
+  const repo = setupTempRepo();
+  try {
+    initWorkspace(repo, "recording");
+    const server = new McpServer({
+      name: "waymark-mcp",
+      tools: WAYMARK_TOOLS,
+      resources: WAYMARK_RESOURCES,
+      prompts: WAYMARK_PROMPTS,
+    });
+
+    // 1. Begin trajectory
+    const beginRes = await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 20,
+      method: "tools/call",
+      params: {
+        name: "waymark_begin",
+        arguments: { root: repo, question: "Temporary investigation" },
+      },
+    }));
+    assert.ok(beginRes);
+    const beginData = JSON.parse(JSON.parse(beginRes).result.content[0].text);
+    assert.ok(beginData.id);
+
+    // 2. Abandon trajectory
+    const abandonRes = await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 21,
+      method: "tools/call",
+      params: {
+        name: "waymark_abandon",
+        arguments: { root: repo, trajectory_id: beginData.id, reason: "superseded" },
+      },
+    }));
+    assert.ok(abandonRes);
+    const abandonData = JSON.parse(JSON.parse(abandonRes).result.content[0].text);
+    assert.equal(abandonData.kind, "abandon");
+    assert.equal(abandonData.ok, true);
+    assert.equal(abandonData.id, beginData.id);
+
+    // 3. Status should now be NONE
+    const statusRes = await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 22,
+      method: "tools/call",
+      params: {
+        name: "waymark_status",
+        arguments: { root: repo },
+      },
+    }));
+    assert.ok(statusRes);
+    const statusData = JSON.parse(JSON.parse(statusRes).result.content[0].text);
+    assert.equal(statusData.status, "NONE");
+  } finally {
+    cleanupTempRepo(repo);
+  }
+});
+
+

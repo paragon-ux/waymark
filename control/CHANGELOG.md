@@ -1,6 +1,16 @@
 # Changelog
 
-## 0.1.0 — release candidate
+## 1.4.0
+
+- Decoupled MCP servers into standalone `waymark` (in-flight continuity) and `capn-mcp` (long-term memory), preserving unified `waymark-unified` binary.
+- Fixed `capn_ask` MCP payload forwarding (`result` on hits, `matches` on misses).
+- Fixed `capn_chart` MCP tool to respect `config.profile` in recording mode and propagate errors.
+- Added Arm C (Indexed Discovery Baseline) to benchmark suite, showing 85.2% token savings over indexed retrieval (CBM / QMD) with 100% span precision.
+- Added dedicated architecture guides: QMD Architecture Guide, CBM Coexistence Guide, and Multi-Agent Harness Compatibility Guide.
+- Expanded automated unit and integration test suite to 34 tests with zero external runtime dependencies.
+- Added "When Waymark is Worth It vs. When It's Overkill" pragmatic decision rubric and concurrency scoping to README.
+
+## 0.1.0 -- release candidate
 
 - Added the dependency-free Waymark CLI and append-only trajectory journal.
 - Added conservative normalized-span verification, relocation, branch

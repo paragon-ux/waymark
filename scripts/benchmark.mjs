@@ -1,4 +1,4 @@
-﻿import fs from "node:fs";
+import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -105,10 +105,21 @@ function runBenchmark() {
         const fileContent = fs.readFileSync(path.join(repo, item.path), "utf8");
         coldBytes += Buffer.byteLength(fileContent, "utf8");
       }
-      // Estimated tokens: 1 token ≈ 4 characters / bytes of code
+      // Estimated tokens: 1 token approx 3.8 bytes of code
       const coldTokens = Math.ceil(coldBytes / 3.8);
 
-      // 2. Arm B: Waymark In-Flight Continuity
+      // 2. Arm C: Indexed / Graph Retrieval Cost (re-querying CBM/QMD for candidate snippets)
+      let indexedBytes = 0;
+      for (const item of task.files) {
+        const fileContent = fs.readFileSync(path.join(repo, item.path), "utf8");
+        const lines = fileContent.split(/\r?\n/);
+        const snippet = lines.slice(Math.max(0, item.start - 1), item.end).join("\n");
+        // AST snippet chunk + JSON-RPC envelope and symbol metadata (~280 bytes overhead per hop)
+        indexedBytes += Buffer.byteLength(snippet, "utf8") + 280;
+      }
+      const indexedTokens = Math.ceil(indexedBytes / 3.8);
+
+      // 3. Arm B: Waymark In-Flight Continuity
       const config = initWorkspace(repo, "recording");
       const id = crypto.randomUUID();
       const provenance = repositoryProvenance(repo);
@@ -156,7 +167,8 @@ function runBenchmark() {
 
       const waymarkBytes = resume.bytes;
       const waymarkTokens = Math.ceil(waymarkBytes / 3.8);
-      const tokenSavingsPct = ((coldTokens - waymarkTokens) / coldTokens) * 100;
+      const coldSavingsPct = Number((((coldTokens - waymarkTokens) / coldTokens) * 100).toFixed(1));
+      const indexedSavingsPct = Number((((indexedTokens - waymarkTokens) / indexedTokens) * 100).toFixed(1));
       const accuracy = checked.verifiedThrough === task.files.length - 1 ? 100 : 0;
 
       results.push({
@@ -164,9 +176,12 @@ function runBenchmark() {
         hops: task.files.length,
         coldBytes,
         coldTokens,
+        indexedBytes,
+        indexedTokens,
         waymarkBytes,
         waymarkTokens,
-        tokenSavingsPct: Number(tokenSavingsPct.toFixed(1)),
+        coldSavingsPct,
+        indexedSavingsPct,
         accuracy,
       });
     } finally {
@@ -175,8 +190,10 @@ function runBenchmark() {
   }
 
   const totalColdTokens = results.reduce((sum, r) => sum + r.coldTokens, 0);
+  const totalIndexedTokens = results.reduce((sum, r) => sum + r.indexedTokens, 0);
   const totalWaymarkTokens = results.reduce((sum, r) => sum + r.waymarkTokens, 0);
-  const avgSavingsPct = Number((((totalColdTokens - totalWaymarkTokens) / totalColdTokens) * 100).toFixed(1));
+  const avgColdSavingsPct = Number((((totalColdTokens - totalWaymarkTokens) / totalColdTokens) * 100).toFixed(1));
+  const avgIndexedSavingsPct = Number((((totalIndexedTokens - totalWaymarkTokens) / totalIndexedTokens) * 100).toFixed(1));
   const avgWaymarkBytes = Math.round(results.reduce((sum, r) => sum + r.waymarkBytes, 0) / results.length);
   const avgAccuracy = results.reduce((sum, r) => sum + r.accuracy, 0) / results.length;
 
@@ -185,8 +202,10 @@ function runBenchmark() {
     kind: "benchmark-report",
     totalTasks: results.length,
     totalColdTokens,
+    totalIndexedTokens,
     totalWaymarkTokens,
-    avgSavingsPct,
+    avgColdSavingsPct,
+    avgIndexedSavingsPct,
     avgWaymarkBytes,
     avgAccuracy,
     tasks: results,

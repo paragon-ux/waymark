@@ -1,13 +1,16 @@
 {
   "name": "waymark",
-  "version": "0.1.0",
+  "version": "1.4.0",
   "private": true,
   "description": "A dependency-free active investigation ledger for Codex compaction continuity.",
   "type": "module",
   "main": "./dist/src/mcp/index.js",
   "bin": {
-    "waymark": "./dist/src/mcp/index.js",
-    "waymark-server": "./dist/src/mcp/index.js",
+    "waymark": "./dist/src/mcp/waymarkIndex.js",
+    "waymark-server": "./dist/src/mcp/waymarkIndex.js",
+    "capn-mcp": "./dist/src/mcp/capnIndex.js",
+    "waymark-capn": "./dist/src/mcp/capnIndex.js",
+    "waymark-unified": "./dist/src/mcp/index.js",
     "waymark-operator": "./dist/src/cli.js"
   },
   "engines": {

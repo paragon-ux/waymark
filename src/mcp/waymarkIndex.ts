@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-import { CAPN_RESOURCES, McpServer, WAYMARK_PROMPTS, WAYMARK_RESOURCES } from "./server.js";
+import { McpServer, WAYMARK_PROMPTS, WAYMARK_RESOURCES } from "./server.js";
 import { WAYMARK_TOOLS } from "./waymarkTools.js";
-import { CAPN_TOOLS } from "./capnTools.js";
 
 const server = new McpServer({
-  name: "waymark-unified-mcp",
+  name: "waymark-mcp",
   version: "1.3.0",
-  tools: [...WAYMARK_TOOLS, ...CAPN_TOOLS],
-  resources: [...WAYMARK_RESOURCES, ...CAPN_RESOURCES],
+  tools: WAYMARK_TOOLS,
+  resources: WAYMARK_RESOURCES,
   prompts: WAYMARK_PROMPTS,
 });
+
 server.runStdio().catch((error) => {
   process.stderr.write(`Waymark MCP server error: ${error instanceof Error ? error.message : String(error)}\n`);
   process.exit(1);
