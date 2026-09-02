@@ -1,10 +1,10 @@
-# Waymark ? In-Flight Continuity MCP Server for AI Coding Agents
+# Waymark — In-Flight Continuity MCP Server for AI Coding Agents
 
 **Don't lose your place when context compaction hits.**
 
 When an AI coding agent is 6 hops deep tracing a complex issue across 5 files, context compaction eventually triggers.
 - **Without Waymark**: In-flight progress is erased. The agent re-reads the entire repository from scratch, wastes thousands of tokens re-deriving the same discoveries, or hallucinates obsolete line numbers.
-- **With Waymark**: The agent calls `waymark_resume` and immediately picks up from its verified breadcrumb trail?with zero repository re-reading.
+- **With Waymark**: The agent calls `waymark_resume` and immediately picks up from its verified breadcrumb trail — with zero repository re-reading.
 
 ---
 
@@ -22,7 +22,7 @@ Waymark bridges the critical gap between static project instructions and finaliz
 
 ## Hard Integrity Guarantees (Why It's Not Just a Notepad)
 
-Waymark is not a passive memo pad?it actively protects the agent against stale evidence and hallucinations:
+Waymark is not a passive memo pad — it actively protects the agent against stale evidence and hallucinations:
 
 1. **Exact & Relocated Span Verification (`MOVED` / `FRESH`):**
    - Each hop records the exact file path, line range, SHA-256 hash, and structural signature.
@@ -153,11 +153,11 @@ Waymark requires calling `waymark_note` for every meaningful hop. Why?
 
 ## Repository Map & Onboarding
 
-- `src/mcp/` ? stdio JSON-RPC MCP server and tool implementations.
-- `src/` ? dependency-free event journal, integrity scanner, and lock primitives.
-- `test/` ? 29 automated unit and integration tests.
-- `schemas/` ? strict machine-output contracts.
-- `control/` ? project state, ownership, and genuine compaction evidence ledger.
+- `src/mcp/` — stdio JSON-RPC MCP server and tool implementations.
+- `src/` — dependency-free event journal, integrity scanner, and lock primitives.
+- `test/` — 29 automated unit and integration tests.
+- `schemas/` — strict machine-output contracts.
+- `control/` — project state, ownership, and genuine compaction evidence ledger.
 
 ### Build & Verify
 Requires Node.js 22+:
