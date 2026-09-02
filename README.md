@@ -28,6 +28,10 @@ A modern AI coding workflow requires three distinct architectural layers:
    - **`CyrusNuevoDia/capn-hook`**: Durable Q&A repository memory.
    - *Role:* Stores finalized, human- or agent-verified conclusions for future sessions.
 
+<p align="center">
+  <img src="docs/assets/architecture-flowchart.svg" alt="Waymark Architecture Flowchart" width="100%" />
+</p>
+
 > [!NOTE]
 > **Clarification on CBM and QMD:** Waymark does **not** bundle, vendor, or internalize `codebase-memory-mcp` (CBM) or `@tobi/qmd`. Waymark remains strictly **zero-dependency**. In our benchmarks [...]
 
