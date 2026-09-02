@@ -1,5 +1,5 @@
 {
-  "name": "waymark-continuity-lab",
+  "name": "waymark",
   "version": "0.1.0",
   "private": true,
   "description": "A dependency-free active investigation ledger for Codex compaction continuity.",

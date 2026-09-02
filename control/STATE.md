@@ -22,10 +22,9 @@ verification and genuine post-compaction recovery ledger are recorded.
 
 ## Verified locally
 
-- Project3 is an independent Git repository; this release attempt is on the
-  non-protected `codex/waymark-release-readiness` branch.
-- Parent `AGENTS.md` and the compact-reload project registry recognize Project3.
-- The registered reload hook returned Project3 `AGENTS.md` and its SHA-256 in a
+- Waymark is an independent Git repository; this release is on `main`.
+- Parent `AGENTS.md` and the compact-reload project registry recognize Waymark.
+- The registered reload hook returned Waymark `AGENTS.md` and its SHA-256 in a
   direct executable smoke test.
 - `npm ci`, TypeScript build, Node tests, schema validation, and public hygiene checks pass locally.
 - The suite covers relocation, stale and cross-branch quarantine, torn journal

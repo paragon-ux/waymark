@@ -1,7 +1,7 @@
 # REVIEW-LEDGER — independent release review
 
 Two read-only `gpt-5.6-luna` maximum-reasoning tasks reviewed the same
-Project3 checkout. Their duplicate findings are merged below so each candidate
+Waymark checkout. Their duplicate findings are merged below so each candidate
 appears exactly once. The review tasks did not edit files or create workers.
 
 | ID | Priority | Candidate defect | Evidence | Triage and resolution |
