@@ -1,20 +1,89 @@
 # Waymark: In-Flight Continuity & Discovery MCP Server for AI Coding Agents
 
-> **Empirical Continuity Benchmark:** Across multi-hop coding investigations, an agent recovering from Waymark used **96.8% fewer recovery tokens** vs. Cold Exploration (~216 tokens vs. 6,675 avg cold tokens) with **100% precision on relocated spans** and **zero redundant file re-inspections**--paying for itself immediately on the 1st compaction. (Reproduce via `npm run benchmark`).
+> **Empirical Continuity Benchmark:** Across multi-hop coding investigations, an agent recovering from Waymark used **96.8% fewer recovery tokens** vs. Cold Exploration (~216 tokens vs. 6,675 avg cold tokens) with **100% precision on relocated spans** and **zero redundant file re-inspections**—paying for itself immediately on the 1st compaction. (Reproduce via `npm run benchmark`).
 
 ---
 
 ## Table of Contents
 
+- [Why Use It?](#why-use-it)
+- [Standardized 3-Tier Harness Model](#standardized-3-tier-harness-model)
+- [Quick Start & Agentic Installation](#quick-start--agentic-installation)
 - [The Compaction Problem](#the-compaction-problem)
 - [Waymark's Active Architecture](#waymarks-active-architecture)
 - [The Proactive Agent Directive](#the-proactive-agent-directive)
-- [MCP Server Configuration](#mcp-server-configuration)
-- [Core MCP Toolsets](#core-mcp-toolsets)
-- [Integrity & Safety Guarantees](#integrity--safety-guarantees)
-- [When Waymark is Worth It vs. Overkill](#when-waymark-is-worth-it-vs-overkill)
+- [Division of Labor with AGENTS.md Compact Reload](#division-of-labor-with-agentsmd-compact-reload)
 - [Repository Directory](#repository-directory)
 - [Deep-Dive Documentation](#deep-dive-documentation)
+- [Build & Verify](#build--verify)
+
+---
+
+## Why Use It?
+
+| Approach | Context and Token Cost | Recovery Precision | Causal Inferences Preserved? |
+| :--- | :--- | :--- | :--- |
+| **No Hook / Cold Exploration** | Extreme (10,000–50,000+ tokens) | Zero (starts over from scratch) | No (wiped on compaction) |
+| **Retrieval Alone (Indexers/LSPs)** | Moderate (3,000–10,000 tokens) | Heuristic / approximate | No (re-derives candidate symbols) |
+| **Ralph-Style Loops** | High (full prompt reconstruction) | Variable (prompt summary fidelity) | No (re-runs outer process) |
+| **Waymark In-Flight Ledger** | **Bounded (<820 B / ~216 tokens)** | **100% (exact Git span hashes)** | **Yes (verified breadcrumb trail)** |
+
+Waymark is designed to preserve causal investigation breadcrumbs across LLM context compactions, eliminate hallucinated line coordinates, and prevent repetitive, costly whole-repo re-reads. See [Rationale](Rationale.MD) for the detailed design comparison and limits.
+
+---
+
+## Standardized 3-Tier Harness Model
+
+Agent harnesses provide varying levels of context-injection capability, categorized into three distinct support tiers:
+
+| Support Tier | Mechanism | Delivery Guarantee | Target Harnesses |
+| :--- | :--- | :--- | :--- |
+| **Tier 1: Active Lifecycle Hook** | Out-of-context process execution on compaction boundary. | **100% deterministic.** Instructions and breadcrumbs prepended before model turn; zero tokens spent remembering to recover. | **OpenAI Codex** (`SessionStart`), **Google Antigravity** (`PreInvocation.injectSteps`), **Claude Code** (`post_compact`). |
+| **Tier 2: MCP Ingestion** | In-band Model Context Protocol primitives. | **High reliability.** Standardized pull; model accesses context via subscribed URIs (`waymark://context`) or prompt commands. | **Claude Code**, **Cursor Composer**, **Windsurf**, **Cline**. |
+| **Tier 3: Persistent Directives** | Sticky system instruction files (`CLAUDE.md`, `.cursor/rules/*.mdc`). | **Best-effort.** Instructs model to call `waymark_resume()` as step 1 when prior turn history is rolled. | **Cursor**, **Claude Code**, **Antigravity**. |
+
+See [Multi-Agent Harness Compatibility Guide](docs/HARNESS-COMPATIBILITY.md) for complete harness schemas.
+
+---
+
+## Quick Start & Agentic Installation
+
+For autonomous agents setting up Waymark inside a project workspace, follow this 3-step workflow:
+
+### 1. Build and Verify
+Ensure Node.js 22+ and Git are installed, then compile the on-device WebAssembly discovery engine:
+
+```bash
+npm ci
+npm run verify
+```
+
+### 2. Client MCP Registration
+Register Waymark in your agent's MCP configuration (`mcpServers` in Claude Desktop, Cursor, Codex, Gemini / Antigravity, or Cline):
+
+```json
+{
+  "mcpServers": {
+    "waymark": {
+      "command": "node",
+      "args": ["<path-to-waymark>/dist/src/mcp/waymarkIndex.js"]
+    }
+  }
+}
+```
+*(For modular Capn episodic memory or unified single-process mode, see [MCP Server Configuration](docs/MCP-CONFIGURATION.md)).*
+
+### 3. Add the Proactive Agent Directive
+Add this 4-rule instruction to your project's persistent rules (`CLAUDE.md`, `.cursor/rules/waymark.mdc`, or harness system prompt):
+
+```text
+1. Before searching codebase, query capn_ask to reuse charted knowledge or trace AST calls.
+2. While tracing code, save verified hops via waymark_note (path, line range, inference).
+3. After context compaction, call waymark_resume to pick up your exact verified breadcrumb trail.
+4. When finished, seal with waymark_complete to archive findings and chart into Capn.
+```
+
+For Tier 1 automated out-of-context hook injection without spending agent turns, register [`scripts/hooks/waymark-compact-hook.mjs`](scripts/hooks/waymark-compact-hook.mjs) in your harness lifecycle configuration.
 
 ---
 
@@ -29,131 +98,41 @@ When an AI coding agent is 6 hops deep tracing a complex issue across 5 files, c
 
 ## Waymark's Active Architecture
 
-Waymark implements a unified, layered system design specifically for agent context preservation and code discovery:
+Waymark implements a layered system design specifically for agent context preservation and code discovery:
 
-| Architectural Component | Engine & Implementation | Active Role in Waymark |
+| Architectural Layer | Engine & Implementation | Active Role in Waymark |
 | :--- | :--- | :--- |
-| **1. On-Demand Local AST** | **Built-in `web-tree-sitter` (WASM)** | Traverses syntax trees in-process (<50ms) to resolve call hierarchies and symbol line ranges with zero background daemons. |
-| **2. In-Flight Continuity Ledger** | **Append-only NDJSON Journal (`.waymark/`)** | Records verified evidence hops, tracks relocated code spans (`MOVED`), and generates bounded resume packets (<216 tokens) upon compaction. |
-| **3. Cross-Session Memory Gateway** | **Capn Memory Bridge (`capnAdapter.ts`)** | Routes conceptual queries to charted repository memory (`capn_ask`) and publishes sealed findings (`waymark_complete`). |
-| **4. Deep Indexer Interoperability** | **External Indexers (QMD, Language Servers)** | Pairs with whole-repo semantic or graph indexers, capturing and verifying candidate snippets into durable continuity trails. |
+| **Layer 1: On-Demand Local AST** | **Built-in `web-tree-sitter` (WASM)** | Traverses syntax trees in-process (<50ms) to resolve call hierarchies and symbol line ranges with zero background daemons. |
+| **Layer 2: Deep Indexer Interop** | **External Indexers (QMD, LSPs)** | Pairs with whole-repo semantic or graph indexers, capturing and verifying candidate snippets into durable continuity trails. |
+| **Layer 3: In-Flight Continuity Ledger** | **Append-only NDJSON Journal (`.waymark/`)** | Records verified evidence hops, tracks relocated code spans (`MOVED`), and generates bounded resume packets (<216 tokens) upon compaction. |
+| **Layer 4: Cross-Session Memory Gateway** | **Capn Memory Bridge (`capnAdapter.ts`)** | Routes conceptual queries to charted repository memory (`capn_ask`) and publishes sealed findings (`waymark_complete`). |
 
-<p align="center">
-  <img src="docs/assets/architecture-flowchart2.svg" alt="Waymark Architecture Flowchart" width="100%" />
-</p>
-
-Waymark unifies **in-flight continuity** (`waymark_*`) and an **intelligent discovery router** (`capn_ask`) in a single runtime:
-- **Local Fast Loop:** Resolves structural questions (`Who calls X?`, `Where is Y declared?`) in milliseconds via in-process WebAssembly AST parsing without port allocations or memory arena overhead.
-- **Compaction Survival:** Locks verified hops against Git HEAD so that when LLM context compaction fires, the agent resumes execution in one step without re-reading the repository.
-- **Ecosystem Compatibility:** Integrates transparently with external indexers when deep semantic retrieval is needed, verifying and anchoring results into immutable breadcrumbs.
+*(For the complete architectural vector flowchart and design rationale, see [Rationale](Rationale.MD)).*
 
 ---
 
-## The Proactive Agent Directive
+## Division of Labor with AGENTS.md Compact Reload
 
-Waymark installs as a native MCP server and provides a single proactive 4-rule directive (available via `waymark://context` resource, `waymark_investigate` prompt, or harness rule):
+In a resilient agent workflow, post-compaction continuity operates across two complementary bootloaders:
 
 ```text
-1. Before searching codebase, query capn_ask to reuse charted knowledge or trace AST calls.
-2. While tracing code, save verified hops via waymark_note (path, line range, inference).
-3. After context compaction, call waymark_resume to pick up your exact verified breadcrumb trail.
-4. When finished, seal with waymark_complete to archive findings and chart into Capn.
+               Context Compaction Occurs
+                          │
+          ┌───────────────┴───────────────┐
+          ▼                               ▼
+ [ AGENTS.md Compact Reload ]      [ waymark-compact-hook ]
+  Target: Root `AGENTS.md`          Target: `.waymark/active.json`
+  Role: Static behavioral rules     Role: Dynamic verified breadcrumbs
+  Output: Project authority & hash  Output: Hops & relocated line spans
+          │                               │
+          └───────────────┬───────────────┘
+                          ▼
+        Immediate Post-Compaction Continuation
+        (Full rules + Exact code breadcrumb trail)
 ```
 
-That directive is the entire integration: no forced middleware, no complex scaffolding. The model reads it and decides.
-
----
-
-## MCP Server Configuration
-
-Waymark runs as a native `stdio` JSON-RPC 2.0 MCP server with pure WebAssembly on-device execution (zero native C++ build tools required).
-
-### Option 1: Standalone In-Flight Continuity (Recommended)
-Add to your client config (`mcpServers` in Claude Desktop, Cursor, Codex, Gemini, or Antigravity):
-
-```json
-{
-  "mcpServers": {
-    "waymark": {
-      "command": "node",
-      "args": ["<path-to-waymark>/dist/src/mcp/waymarkIndex.js"]
-    }
-  }
-}
-```
-
-### Option 2: Modular Continuity + Long-Term Memory
-```json
-{
-  "mcpServers": {
-    "waymark": {
-      "command": "node",
-      "args": ["<path-to-waymark>/dist/src/mcp/waymarkIndex.js"]
-    },
-    "capn": {
-      "command": "node",
-      "args": ["<path-to-waymark>/dist/src/mcp/capnIndex.js"]
-    }
-  }
-}
-```
-
-### Option 3: Unified Server (Both in One Process)
-```json
-{
-  "mcpServers": {
-    "waymark": {
-      "command": "node",
-      "args": ["<path-to-waymark>/dist/src/mcp/index.js"]
-    }
-  }
-}
-```
-
----
-
-## Core MCP Toolsets
-
-### Continuity Server (`waymark`)
-- **`waymark_begin`**: Start a new durable in-flight code investigation for a question.
-- **`waymark_note`**: Record a verified code hop (`path`, `label`, `start_line`, `end_line`, `inference`).
-- **`waymark_check`**: Verify worktree integrity against current Git HEAD and detect line relocations.
-- **`waymark_resume`**: Retrieve the bounded compact-resume packet after context compaction.
-- **`waymark_complete`**: Seal the active trajectory, archive the journal, and record findings.
-- **`waymark_status`**: Retrieve current active trajectory status (`NONE`, `STAGED`, `STALE`).
-- **`waymark_abandon`**: Discard an active trajectory cleanly.
-- **`waymark_init`**: Configure repository workspace profiles.
-- **Resources & Prompts**: `waymark://context`, `waymark://status`, and `waymark_investigate`.
-
-### Memory & Discovery Server (`capn-mcp`)
-- **`capn_ask`**: Intelligent two-phase discovery router:
-  - Resolves structural code queries (call hierarchies, symbol locations) via in-process WebAssembly AST parsing (`provider: "wasm-ast"`).
-  - Queries Capn's charted repository memory for previously answered architectural rationale (`provider: "capn-cli"`).
-- **`capn_chart`**: Directly chart a question, answer, and referenced files into Capn.
-- **Resources**: `capn://status`.
-
----
-
-## Integrity & Safety Guarantees
-
-1. **Exact & Relocated Span Verification (`MOVED` / `FRESH`):** Each hop records file path, line range, SHA-256 hash, and structural signature. If code shifts, Waymark automatically relocates the span up to 2,000 lines.
-2. **Fail-Closed Stale Quarantine (`STALE`):** If recorded code is modified, deleted, or ambiguous, Waymark halts continuation and trusts only hops up to the first valid hop (`verifiedThrough`).
-3. **Branch & Commit Drift Protection (`CROSS_BRANCH`):** If Git branch or HEAD changes mid-investigation, Waymark halts with `CROSS_BRANCH` instead of mixing evidence across versions.
-4. **Crash-Proof Immutable Journal:** Append-only NDJSON event journal with filesystem locking, atomic writes, and fsync.
-
----
-
-## When Waymark is Worth It vs. Overkill
-
-- **Worth It:**
-  - Multi-hop investigations spanning 2+ files or complex call chains.
-  - Tasks expected to exceed single-turn context limits (>10k tokens).
-  - Shared repositories or active worktrees where code shifts mid-investigation.
-  - Audit trails for complex security, refactoring, or bug reproductions.
-- **Overkill:**
-  - Single-file edits or simple typo/syntax fixes.
-  - Exploratory prototyping where in-flight continuity is disposable.
-  - Tasks easily completed in a single conversational turn.
+1. **Static Project Governance ([AGENTS.md Compact Reload](https://github.com/paragon-ux/codex-agents-compact-reload)):** Reloads the root `AGENTS.md` and validates its SHA-256 hash. Ensures the agent never forgets its behavioral boundaries, test requirements, or safety invariants.
+2. **Dynamic In-Flight Trajectory ([`waymark-compact-hook.mjs`](scripts/hooks/waymark-compact-hook.mjs)):** Reloads the active `.waymark/` journal, verifies Git line anchors, detects relocated spans (`MOVED`), and injects the verified breadcrumb trail (<216 tokens).
 
 ---
 
@@ -161,6 +140,7 @@ Add to your client config (`mcpServers` in Claude Desktop, Cursor, Codex, Gemini
 
 ```text
 Waymark/
+├── Rationale.MD               # Architectural rationale, vector diagram, & integrity model
 ├── src/
 │   ├── astExtractor.ts        # Polyglot WebAssembly AST extractor (30+ languages)
 │   ├── discoveryRouter.ts     # Two-phase discovery router (memory + WASM AST)
@@ -181,6 +161,11 @@ Waymark/
 │   ├── hooks/                 # Out-of-context harness hooks (waymark-hook)
 │   └── verify-mermaid.mjs     # Architecture diagram integrity check
 ├── docs/                      # Deep-dive architecture and benchmark guides
+│   ├── MCP-CONFIGURATION.md   # Deployment options and full MCP toolsets reference
+│   ├── CAPN-AND-DISCOVERY.md  # Capn-mcp profiles & WASM AST intent detection
+│   ├── DISCOVERY-BENCHMARK.md # 25-query mixed benchmark vs graph indexers
+│   ├── MULTI-AGENT-AND-CAPN.md# Multi-agent coordination & shared memory guide
+│   └── HARNESS-COMPATIBILITY.md# 3-tier harness classification & hook setup
 └── test/                      # 39 automated unit and integration tests
 ```
 
@@ -188,16 +173,18 @@ Waymark/
 
 ## Deep-Dive Documentation
 
+- **[Architectural Rationale & Integrity Model](Rationale.MD)**: Complete design rationale, 4-layer vector flowchart, and safety model.
+- **[MCP Configuration & Toolsets Guide](docs/MCP-CONFIGURATION.md)**: Deployment options (standalone, modular, unified) and full tool parameter specifications.
 - **[Capn Memory & Two-Phase Discovery Guide](docs/CAPN-AND-DISCOVERY.md)**: Deep dive into `capn-mcp`, adapter profiles, and WASM AST intent detection.
 - **[On-Device Discovery & Benchmark Report](docs/DISCOVERY-BENCHMARK.md)**: 25-query mixed evaluation and layered comparison against dedicated graph indexers.
-- **[QMD Architecture & Retrieval Guide](docs/QMD-AND-DISCOVERY.md)**: On-device hybrid search, AST chunking, and division of labor.
 - **[Multi-Agent Coordination & Capn Architecture Guide](docs/MULTI-AGENT-AND-CAPN.md)**: Shared episodic memory, worktree concurrency scoping, and scale characteristics.
 - **[Multi-Agent Harness Compatibility Guide](docs/HARNESS-COMPATIBILITY.md)**: 3-tier support classification, lifecycle hooks (`waymark-hook`), and multi-harness setup for Claude Code, Cursor, Codex, and Antigravity.
 - **[Audit and Optimization Report](docs/AUDIT-AND-OPTIMIZATION-REPORT.md)**: Full audit ledger and empirical continuity benchmark analysis.
 
 ---
 
-### Build & Verify
+## Build & Verify
+
 Requires Node.js 22+:
 
 ```bash
