@@ -75,3 +75,10 @@ Investigations are cryptographically bound to the starting Git branch and commit
 - **Single-File Fixes:** Isolated typos, syntax corrections, or formatting changes.
 - **Disposable Prototyping:** Quick exploratory scripts where in-flight continuity is not needed.
 - **Trivial Tasks:** Any assignment easily completed in 1 to 2 conversational turns.
+
+---
+
+## 5. Architectural Decision Records (ADRs)
+
+For architectural boundary enforcement, evolutionary roadmaps, and scope creep evaluations, consult:
+- **[ADR-001: Architectural Evolution, Scope Boundaries, and Next-Step Validation](docs/adr/ADR-001-ARCHITECTURAL-EVOLUTION-AND-SCOPE-BOUNDARIES.md)**: Formal evaluation of live Tier 1 host acceptance, `npx` packaging, worktree concurrency, and explicit rejection of monolithic/daemon bloat.

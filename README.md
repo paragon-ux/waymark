@@ -161,6 +161,7 @@ Waymark/
 │   ├── hooks/                 # Out-of-context harness hooks (waymark-hook)
 │   └── verify-mermaid.mjs     # Architecture diagram integrity check
 ├── docs/                      # Deep-dive architecture and benchmark guides
+│   ├── adr/                   # Architectural Decision Records (ADR-001)
 │   ├── MCP-CONFIGURATION.md   # Deployment options and full MCP toolsets reference
 │   ├── CAPN-AND-DISCOVERY.md  # Capn-mcp profiles & WASM AST intent detection
 │   ├── DISCOVERY-BENCHMARK.md # 25-query mixed benchmark vs graph indexers
@@ -174,6 +175,7 @@ Waymark/
 ## Deep-Dive Documentation
 
 - **[Architectural Rationale & Integrity Model](Rationale.MD)**: Complete design rationale, 4-layer vector flowchart, and safety model.
+- **[ADR-001: Architectural Evolution & Scope Boundaries](docs/adr/ADR-001-ARCHITECTURAL-EVOLUTION-AND-SCOPE-BOUNDARIES.md)**: Formal evaluation of next steps, empirical host acceptance, and rejection of monolithic/daemon creep.
 - **[MCP Configuration & Toolsets Guide](docs/MCP-CONFIGURATION.md)**: Deployment options (standalone, modular, unified) and full tool parameter specifications.
 - **[Capn Memory & Two-Phase Discovery Guide](docs/CAPN-AND-DISCOVERY.md)**: Deep dive into `capn-mcp`, adapter profiles, and WASM AST intent detection.
 - **[On-Device Discovery & Benchmark Report](docs/DISCOVERY-BENCHMARK.md)**: 25-query mixed evaluation and layered comparison against dedicated graph indexers.
