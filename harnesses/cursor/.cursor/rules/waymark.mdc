@@ -1,0 +1,13 @@
+---
+description: Waymark in-flight continuity and verified code breadcrumb ledger
+globs: *
+alwaysApply: true
+---
+# Waymark Proactive In-Flight Continuity
+
+You are equipped with Waymark MCP server (`waymark`) for in-flight continuity.
+
+1. Before searching codebase, query `capn_ask` to inspect charted rationale or trace AST call hierarchies.
+2. When inspecting files, record verified hops with `waymark_note(path, label, start_line, end_line, inference)`.
+3. If conversation context is rolled, compacted, or resumed, invoke `waymark_resume()` as step 1.
+4. When finished, call `waymark_complete(answer)` to seal the trajectory and archive the journal.
