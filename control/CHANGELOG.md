@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.6.0
+
+- **In-Process WebAssembly AST Discovery Engine:** Integrated pure WebAssembly `web-tree-sitter` and pre-compiled grammars (`tree-sitter-wasms`) covering 30+ languages (TS, JS, Python, Go, Rust, Java, C/C++, C#, Ruby, PHP, Swift, Bash, etc.). Extracts symbols (including arrow functions), exact 1-indexed line spans, caller/callee trees, and entrypoints in <50ms with zero native C++ compilation (no node-gyp/MSVC) and zero background daemons.
+- **Two-Phase Intelligent Discovery Router (`capn_ask`):** Upgraded `capn_ask` into a dual-phase discovery router that automatically checks in-process AST for structural code queries (`wasm-ast`) and falls back to Capn charted memory for architectural rationale (`capn-cli`).
+- **Empirical Discovery Benchmark:** Evaluated 25 mixed queries across memory recall, call hierarchies, symbol locations, and architecture mapping with 100% precision (25/25), 1.36s avg latency, and 99.6% RAM reduction vs. persistent graph engines.
+- **Streamlined Documentation Architecture:** Added Table of Contents, visual Repository Directory, and dedicated `docs/CAPN-AND-DISCOVERY.md` and `docs/DISCOVERY-BENCHMARK.md` guides while eliminating retrospective legacy mentions from the main README.
+
 ## 1.5.0 -- First Production-Stable Release
 
 - **Proven 5-Stage Ecosystem Lifecycle:** Recreated and benchmarked the complete agentic coding memory pipeline across Discovery (CBM / QMD), In-Flight Continuity (Waymark), Compaction Recovery (Lifecycle Hook), Trajectory Sealing (Capn Chart), and Cross-Session Cold Recall (Capn Ask).

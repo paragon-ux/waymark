@@ -4,7 +4,7 @@ Last updated: 2026-09-02.
 
 ## Current phase
 
-**Phase 9 -- Dynamic utility stress lab, full 5-stage ecosystem lifecycle proof (CBM + QMD + Waymark + Capn), out-of-context lifecycle hooks, and v1.5.0 production-stable release: DONE.** Built automated dynamic stress harness verifying span drift, ambiguity collision, broken bridges, and cross-branch containment (100% utility score); validated live blind resumption with Gemini Flash 3.8 subagent (>85% token savings without raw file reads); proved full 5-stage ecosystem lifecycle across Discovery (CBM/QMD), In-Flight (Waymark), Compaction Hook, Sealing, and Cold Recall (Capn); tagged v1.5.0 production-stable release.
+**Phase 10 -- Polyglot WebAssembly AST discovery engine, two-phase discovery router, empirical 25-query mixed benchmark, and v1.6.0 release: DONE.** Implemented in-process WebAssembly Tree-sitter engine supporting 30+ languages for sub-second AST call-graph tracing and exact symbol line ranges; converted capn_ask into a dual-phase discovery router cascading between memory and in-process AST; validated 25-query mixed benchmark with 100% precision (25/25), 1.36s avg latency, and 0 background daemons; expanded unit/integration test suite to 39 tests with zero failures; overhauled documentation architecture with TOC and visual repository directory; tagged v1.6.0 release.
 
 ## Phase plan
 
@@ -18,6 +18,7 @@ Last updated: 2026-09-02.
 - Phase 7 -- native MCP server, Capn MCP wrapper, and zero-guesswork documentation cleanup. **DONE**
 - Phase 8 -- linear audit, MCP decoupling, indexed benchmark baseline, and v1.4.0 release. **DONE**
 - Phase 9 -- dynamic utility lab, ecosystem lifecycle proof, and v1.5.0 production-stable release. **DONE**
+- Phase 10 -- polyglot WebAssembly AST discovery, two-phase discovery router, and v1.6.0 release. **DONE**
 
 ## Verified locally
 
@@ -26,7 +27,7 @@ Last updated: 2026-09-02.
 - The registered reload hook returned Waymark `AGENTS.md` and its SHA-256 in a
   direct executable smoke test.
 - `npm ci`, TypeScript build, Node tests, MCP test suite, schema validation, and public hygiene checks pass locally.
-- 35/35 tests pass with zero failures.
+- 39/39 tests pass with zero failures.
 - The suite covers MCP tools/lifecycle, relocation, stale and cross-branch quarantine, torn journal
   recovery, locks, serializer bounds, path safety, hook suppression, and Capn
   argv behavior.

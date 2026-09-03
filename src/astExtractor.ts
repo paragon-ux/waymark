@@ -31,19 +31,55 @@ export interface AstExtractionResult {
 }
 
 const EXT_TO_WASM: Record<string, string> = {
+  // TypeScript & JavaScript
   ".ts": "tree-sitter-typescript.wasm",
   ".tsx": "tree-sitter-tsx.wasm",
   ".js": "tree-sitter-javascript.wasm",
   ".mjs": "tree-sitter-javascript.wasm",
   ".cjs": "tree-sitter-javascript.wasm",
+  ".jsx": "tree-sitter-javascript.wasm",
+  // Python
   ".py": "tree-sitter-python.wasm",
+  // Go
   ".go": "tree-sitter-go.wasm",
+  // Rust
   ".rs": "tree-sitter-rust.wasm",
+  // Java & JVM
   ".java": "tree-sitter-java.wasm",
+  ".kt": "tree-sitter-kotlin.wasm",
+  ".kts": "tree-sitter-kotlin.wasm",
+  ".scala": "tree-sitter-scala.wasm",
+  // C, C++, Objective-C
   ".c": "tree-sitter-c.wasm",
   ".h": "tree-sitter-c.wasm",
   ".cpp": "tree-sitter-cpp.wasm",
   ".hpp": "tree-sitter-cpp.wasm",
+  ".cc": "tree-sitter-cpp.wasm",
+  ".cxx": "tree-sitter-cpp.wasm",
+  ".m": "tree-sitter-objc.wasm",
+  // C#
+  ".cs": "tree-sitter-c_sharp.wasm",
+  // Ruby & PHP
+  ".rb": "tree-sitter-ruby.wasm",
+  ".php": "tree-sitter-php.wasm",
+  // Swift
+  ".swift": "tree-sitter-swift.wasm",
+  // Shell scripts
+  ".sh": "tree-sitter-bash.wasm",
+  ".bash": "tree-sitter-bash.wasm",
+  // Lua
+  ".lua": "tree-sitter-lua.wasm",
+  // Systems / Functional / Smart Contracts
+  ".zig": "tree-sitter-zig.wasm",
+  ".dart": "tree-sitter-dart.wasm",
+  ".el": "tree-sitter-elisp.wasm",
+  ".ex": "tree-sitter-elixir.wasm",
+  ".exs": "tree-sitter-elixir.wasm",
+  ".elm": "tree-sitter-elm.wasm",
+  ".ml": "tree-sitter-ocaml.wasm",
+  ".mli": "tree-sitter-ocaml.wasm",
+  ".res": "tree-sitter-rescript.wasm",
+  ".sol": "tree-sitter-solidity.wasm",
 };
 
 let parserInitialized = false;
@@ -203,6 +239,36 @@ export async function extractAstFromRepo(
           walk(child, currentClass, qualifiedName);
         }
         return;
+      }
+
+      if (node.type === "variable_declarator") {
+        const nameNode = node.childForFieldName("name");
+        const valueNode = node.childForFieldName("value");
+        if (
+          nameNode &&
+          valueNode &&
+          (valueNode.type === "arrow_function" ||
+            valueNode.type === "function_expression" ||
+            valueNode.type === "function")
+        ) {
+          const fnName = nameNode.text;
+          const kind = currentClass ? "Method" : "Function";
+          const qualifiedName = currentClass ? `${currentClass}.${fnName}` : fnName;
+
+          symbols.push({
+            name: fnName,
+            qualifiedName: `${relPath}:${qualifiedName}`,
+            kind,
+            file: relPath,
+            startLine: node.startPosition.row + 1,
+            endLine: node.endPosition.row + 1,
+          });
+
+          for (const child of node.children) {
+            walk(child, currentClass, qualifiedName);
+          }
+          return;
+        }
       }
 
       if (node.type === "call_expression" || node.type === "call") {
