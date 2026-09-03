@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { AdapterProfile, PublicationResult, WaymarkError } from "./types.js";
 import { atomicWriteFile } from "./journal.js";
 import { assertSafeWaymarkStore } from "./paths.js";
+import { detectAstIntent, queryWasmAst } from "./discoveryRouter.js";
 
 const execFileAsync = promisify(execFile);
 const MAX_OUTPUT = 2000;
@@ -122,25 +123,48 @@ export async function ask(
 ): Promise<Record<string, unknown>> {
   if (profile === "none") return { waymark: 1, kind: "ask", provider: "none", status: "miss", matches: [] };
   if (profile === "recording") return { waymark: 1, kind: "ask", provider: "recording", status: "miss", matches: [] };
+
+  const intent = detectAstIntent(question);
+
+  // If question is structural AST query, check in-process Tree-sitter WASM directly
+  if (intent.requiresParser) {
+    const astResult = await queryWasmAst(intent, root);
+    if (astResult.hit) {
+      return {
+        waymark: 1,
+        kind: "ask",
+        provider: "wasm-ast",
+        status: "hit",
+        result: digestOutput(astResult.output),
+      };
+    }
+  }
+
+  // Phase 1 / Fallback: Query Capn memory via executable
   try {
     const result = await execute(root, executable, ["ask", question]);
     const stdout = (result.stdout || "").trim();
-    if (!stdout) return { waymark: 1, kind: "ask", provider: "capn-cli", status: "miss", matches: [] };
-    if (stdout.startsWith("No charted answer.")) return { waymark: 1, kind: "ask", provider: "capn-cli", status: "miss", matches: [] };
-    try {
-      const parsed: unknown = JSON.parse(stdout);
-      return { waymark: 1, kind: "ask", provider: "capn-cli", status: "hit", result: parsed };
-    } catch {
-      return { waymark: 1, kind: "ask", provider: "capn-cli", status: "hit", result: digestOutput(stdout) };
+    if (stdout && !stdout.startsWith("No charted answer.")) {
+      try {
+        const parsed: unknown = JSON.parse(stdout);
+        return { waymark: 1, kind: "ask", provider: "capn-cli", status: "hit", result: parsed };
+      } catch {
+        return { waymark: 1, kind: "ask", provider: "capn-cli", status: "hit", result: digestOutput(stdout) };
+      }
     }
   } catch (error) {
-    const candidate = error as { message?: string; stderr?: string; code?: string | number };
-    return {
-      waymark: 1,
-      kind: "ask",
-      provider: "capn-cli",
-      status: "error",
-      error: digestOutput(`${candidate.code ?? "CAPN_ERROR"}: ${candidate.stderr || candidate.message || "Capn ask failed"}`),
-    };
+    // If Capn errored and AST intent wasn't checked yet, try AST as fallback
+    if (!intent.requiresParser) {
+      const candidate = error as { message?: string; stderr?: string; code?: string | number };
+      return {
+        waymark: 1,
+        kind: "ask",
+        provider: "capn-cli",
+        status: "error",
+        error: digestOutput(`${candidate.code ?? "CAPN_ERROR"}: ${candidate.stderr || candidate.message || "Capn ask failed"}`),
+      };
+    }
   }
+
+  return { waymark: 1, kind: "ask", provider: "capn-cli", status: "miss", matches: [] };
 }

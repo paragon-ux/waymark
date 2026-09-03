@@ -31,5 +31,9 @@
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
     "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.24.0"
   }
 }
