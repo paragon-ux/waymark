@@ -2,7 +2,7 @@
 
 This runbook is for the one-task Luna demonstration. It is intentionally separate
 from the product runtime: Waymark records durable investigation state, while the
-existing `codex-agents-compact-reload` hook supplies the reloaded `AGENTS.md`.
+existing AGENTS.md Compact Reload (`codex-agents-compact-reload`) hook supplies the reloaded `AGENTS.md`.
 
 ## Normal self-hosting loop
 

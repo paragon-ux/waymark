@@ -5,7 +5,7 @@ This report documents the architectural audit, framing review, and linear optimi
 ## 1. Background and Context
 
 Waymark exists in a lineage of projects exploring agent continuity across context compactions:
-- **Trellis and Mosaic (Projects 1 and 2):** Built using DeepSeek Pro / Flash Max as independent testbeds to evaluate the `codex-agents-compact-reload` hook under various operational workflows. They were not designed as an integrated application suite with Waymark.
+- **Trellis and Mosaic (Projects 1 and 2):** Built using DeepSeek Pro / Flash Max as independent testbeds to evaluate the AGENTS.md Compact Reload (`codex-agents-compact-reload`) hook under various operational workflows. They were not designed as an integrated application suite with Waymark.
 - **Waymark (Project 3):** Developed with GPT 5.6 Luna and Gemini to attempt a genuine external integration. Waymark solves the in-flight continuity problem: preserving active, unfinalized code-and-line evidence hops across context compactions with cryptographic-like provenance and a bounded (<2,048 byte) resume packet.
 
 ## 2. Executive Findings Summary
