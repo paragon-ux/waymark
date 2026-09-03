@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
@@ -604,6 +605,128 @@ test("Universal post-compaction lifecycle hook script generates valid Markdown a
     assert.equal(parsed.verifiedThrough, 0);
     assert.equal(parsed.hops.length, 1);
     assert.equal(parsed.hops[0].path, "auth.ts");
+  } finally {
+    cleanupTempRepo(repo);
+  }
+});
+
+test("Test A: Lifecycle hook injects SessionStart additionalContext for Codex and injectSteps for Antigravity", async () => {
+  const repo = setupTempRepo();
+  try {
+    initWorkspace(repo, "recording");
+    const hookScript = path.resolve(process.cwd(), "scripts", "hooks", "waymark-compact-hook.mjs");
+    const server = new McpServer({
+      name: "waymark-mcp",
+      tools: WAYMARK_TOOLS,
+      resources: WAYMARK_RESOURCES,
+      prompts: WAYMARK_PROMPTS,
+    });
+    const sampleFile = path.join(repo, "auth.ts");
+    fs.writeFileSync(sampleFile, "export function verifySignature() {\n  return true;\n}\n");
+    execFileSync("git", ["add", "auth.ts"], { cwd: repo, windowsHide: true });
+    execFileSync("git", ["commit", "-m", "add auth.ts"], { cwd: repo, windowsHide: true });
+
+    const beginRes = await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 40,
+      method: "tools/call",
+      params: {
+        name: "waymark_begin",
+        arguments: { root: repo, question: "Test A Manual Compaction Verification" },
+      },
+    }));
+    assert.ok(beginRes);
+    const beginData = JSON.parse(JSON.parse(beginRes as string).result.content[0].text);
+
+    await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 41,
+      method: "tools/call",
+      params: {
+        name: "waymark_note",
+        arguments: {
+          root: repo,
+          trajectory_id: String(beginData.id),
+          path: "auth.ts",
+          label: "marker-hop",
+          start_line: 1,
+          end_line: 3,
+          inference: "Verifies marker-hop in Test A",
+        },
+      },
+    }));
+
+    // 1. Codex SessionStart with compact source
+    const codexPayload = JSON.stringify({
+      hook_event_name: "SessionStart",
+      source: "compact",
+      cwd: repo,
+    });
+    const codexOut = execFileSync(process.execPath, [hookScript], {
+      input: codexPayload,
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    const parsedCodex = JSON.parse(codexOut.trim());
+    assert.equal(parsedCodex.hookSpecificOutput.hookEventName, "SessionStart");
+    assert.match(parsedCodex.hookSpecificOutput.additionalContext, /Test A Manual Compaction Verification/);
+    assert.match(parsedCodex.hookSpecificOutput.additionalContext, /marker-hop/);
+
+    // 2. Google Antigravity PreInvocation with workspacePaths
+    const agyPayload = JSON.stringify({
+      workspacePaths: [repo],
+      invocationNum: 2,
+    });
+    const agyOut = execFileSync(process.execPath, [hookScript], {
+      input: agyPayload,
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    const parsedAgy = JSON.parse(agyOut.trim());
+    assert.ok(Array.isArray(parsedAgy.injectSteps));
+    assert.match(parsedAgy.injectSteps[0].ephemeralMessage, /Test A Manual Compaction Verification/);
+    assert.match(parsedAgy.injectSteps[0].ephemeralMessage, /marker-hop/);
+  } finally {
+    cleanupTempRepo(repo);
+  }
+});
+
+test("Test B: Lifecycle hook filters non-compact events to prevent duplicate replay", async () => {
+  const repo = setupTempRepo();
+  try {
+    initWorkspace(repo, "recording");
+    const hookScript = path.resolve(process.cwd(), "scripts", "hooks", "waymark-compact-hook.mjs");
+
+    // 1. Non-compact Codex SessionStart (e.g. startup/ordinary turn)
+    const normalSessionPayload = JSON.stringify({
+      hook_event_name: "SessionStart",
+      source: "startup",
+      cwd: repo,
+    });
+    const normalOut = execFileSync(process.execPath, [hookScript], {
+      input: normalSessionPayload,
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    assert.equal(normalOut.trim(), "{}");
+
+    // 2. Unregistered or empty repo returns no-op
+    const outsideRepo = fs.mkdtempSync(path.join(os.tmpdir(), "outside-repo-"));
+    try {
+      const outsidePayload = JSON.stringify({
+        hook_event_name: "SessionStart",
+        source: "compact",
+        cwd: outsideRepo,
+      });
+      const outsideOut = execFileSync(process.execPath, [hookScript], {
+        input: outsidePayload,
+        encoding: "utf8",
+        windowsHide: true,
+      });
+      assert.equal(outsideOut.trim(), "{}");
+    } finally {
+      fs.rmSync(outsideRepo, { recursive: true, force: true });
+    }
   } finally {
     cleanupTempRepo(repo);
   }
