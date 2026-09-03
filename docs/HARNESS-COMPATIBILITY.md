@@ -32,7 +32,46 @@ To achieve true, unbreakable continuity across severe compactions, Waymark provi
 
 ---
 
-## 2. Universal Executable Hook: `waymark-compact-hook.mjs`
+## 2. Standardized 3-Tier Harness Support Model
+
+Agent harnesses provide varying levels of context-injection capability, categorized into three distinct support tiers:
+
+| Support Tier | Mechanism | Delivery Guarantee | Target Harnesses |
+| :--- | :--- | :--- | :--- |
+| **Tier 1: Active Lifecycle Hook Injection** | Out-of-context process execution on compaction/session boundary. | **100% deterministic.** Context injected before model invocation without spending tokens or turns. | **OpenAI Codex** (`SessionStart` with `source: compact`), **Google Antigravity** (`PreInvocation.injectSteps`), **Claude Code** (`post_compact`). |
+| **Tier 2: MCP Resource & Prompt Ingestion** | In-band Model Context Protocol primitives (`resources/read`, `prompts/get`). | **High reliability.** Standardized pull; model accesses context via subscribed URIs or prompt commands. | **Claude Code**, **Cursor Composer**, **Windsurf**, **Cline**. |
+| **Tier 3: Persistent Prompt Directives** | Sticky system framing files surviving context window compactions. | **Best-effort.** Instructs model to call `waymark_resume()` as step 1 when prior turn history is rolled. | **Cursor** (`.cursor/rules/*.mdc`), **Claude Code** (`CLAUDE.md`), **Antigravity** (`<RULE>` system blocks). |
+
+---
+
+## 3. Division of Labor: Static Rules vs. Dynamic Breadcrumbs
+
+In a resilient agent workflow, post-compaction continuity operates across two complementary bootloaders:
+
+```text
+               Context Compaction Occurs
+                          │
+          ┌───────────────┴───────────────┐
+          ▼                               ▼
+ [ codex-agents-compact-reload ]   [ waymark-compact-hook ]
+  Target: Root `AGENTS.md`          Target: `.waymark/active.json`
+  Role: Static behavioral rules     Role: Dynamic verified breadcrumbs
+  Output: Project authority & hash  Output: Hops & relocated line spans
+          │                               │
+          └───────────────┬───────────────┘
+                          ▼
+        Immediate Post-Compaction Continuation
+        (Full rules + Exact code breadcrumb trail)
+```
+
+1. **Static Project Governance ([`codex-agents-compact-reload`](https://github.com/paragon-ux/codex-agents-compact-reload)):** Reloads the root `AGENTS.md` and validates its SHA-256 hash. Ensures the agent never forgets its behavioral boundaries, test requirements, or safety invariants.
+2. **Dynamic In-Flight Trajectory ([`waymark-compact-hook.mjs`](../scripts/hooks/waymark-compact-hook.mjs)):** Reloads the active `.waymark/` journal, verifies Git line anchors, detects relocated spans (`MOVED`), and injects the verified breadcrumb trail (<216 tokens).
+
+For harnesses that accept a single lifecycle command (such as Codex `SessionStart`), both can be chained sequentially in a shell wrapper or registered together.
+
+---
+
+## 4. Universal Executable Hook: `waymark-compact-hook.mjs`
 
 Waymark includes a standalone, dependency-free lifecycle hook:
 [`scripts/hooks/waymark-compact-hook.mjs`](../scripts/hooks/waymark-compact-hook.mjs)
@@ -53,7 +92,7 @@ node <path-to-waymark>/scripts/hooks/waymark-compact-hook.mjs --format=json
 
 ---
 
-## 3. Harness-by-Harness Hook Configuration
+## 5. Harness-by-Harness Hook Configuration
 
 ### A. OpenAI Codex CLI
 

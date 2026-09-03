@@ -191,7 +191,8 @@ Waymark/
 - **[Capn Memory & Two-Phase Discovery Guide](docs/CAPN-AND-DISCOVERY.md)**: Deep dive into `capn-mcp`, adapter profiles, and WASM AST intent detection.
 - **[On-Device Discovery & Benchmark Report](docs/DISCOVERY-BENCHMARK.md)**: 25-query mixed evaluation and layered comparison against dedicated graph indexers.
 - **[QMD Architecture & Retrieval Guide](docs/QMD-AND-DISCOVERY.md)**: On-device hybrid search, AST chunking, and division of labor.
-- **[Multi-Agent Harness Compatibility Guide](docs/HARNESS-COMPATIBILITY.md)**: Out-of-context lifecycle hooks (`waymark-hook`) and rules for Claude Code, Cursor, Codex, and Antigravity.
+- **[Multi-Agent Coordination & Capn Architecture Guide](docs/MULTI-AGENT-AND-CAPN.md)**: Shared episodic memory, worktree concurrency scoping, and scale characteristics.
+- **[Multi-Agent Harness Compatibility Guide](docs/HARNESS-COMPATIBILITY.md)**: 3-tier support classification, lifecycle hooks (`waymark-hook`), and multi-harness setup for Claude Code, Cursor, Codex, and Antigravity.
 - **[Audit and Optimization Report](docs/AUDIT-AND-OPTIMIZATION-REPORT.md)**: Full audit ledger and empirical continuity benchmark analysis.
 
 ---
