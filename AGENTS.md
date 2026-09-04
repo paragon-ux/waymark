@@ -2,11 +2,6 @@
 
 Waymark is an MCP server that preserves in-flight code investigations across LLM context compactions, delegating finalized memory to Capn.
 
-## Suite Boundaries & Invariants
-- **Ecosystem Role**: `Waymark` manages dynamic in-flight trajectory hops (`.waymark/`), paired with `codex-agents-compact-reload` for static `AGENTS.md` rules and `Arbiter` for isolated worktrees.
-- **The 1:1:1 Invariant**: Exactly 1 Task : 1 Worktree : 1 Trajectory. Never cross git branch boundaries or mutate foreign worktrees.
-- See `README.md` for full cross-repository architecture specifications.
-
 ## Primary Interface: MCP Tool Protocol
 
 Agents interact with Waymark directly through its native MCP tools:
