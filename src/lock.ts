@@ -102,6 +102,20 @@ function processIsRunning(pid: number): boolean {
   }
 }
 
+export function inspectLock(root: string): { locked: boolean; owner?: LockMetadata; active?: boolean } {
+  assertSafeWaymarkStore(root);
+  assertLockDirectorySafe(root);
+  const directory = lockDirectory(root);
+  if (!fs.existsSync(directory)) return { locked: false };
+  assertMetadataSafe(root);
+  try {
+    const owner = JSON.parse(fs.readFileSync(metadataPath(root), "utf8")) as LockMetadata;
+    return { locked: true, owner, active: processIsRunning(owner.pid) };
+  } catch {
+    return { locked: true, active: false };
+  }
+}
+
 export function recoverLock(root: string, force: boolean): { recovered: boolean; previous?: LockMetadata } {
   assertSafeWaymarkStore(root);
   assertLockDirectorySafe(root);

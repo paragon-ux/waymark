@@ -10,7 +10,7 @@ import {
   WaymarkError,
   WaymarkEvent,
 } from "../types.js";
-import { acquireLock } from "../lock.js";
+import { acquireLock, inspectLock, recoverLock } from "../lock.js";
 import {
   appendEvent,
   createHopEvent,
@@ -572,6 +572,58 @@ export const waymarkAbandonTool: McpToolHandler = {
   },
 };
 
+export const waymarkRecoverLockTool: McpToolHandler = {
+  definition: {
+    name: "waymark_recover_lock",
+    description: "Inspect or recover an orphaned trajectory lock when a prior agent or process terminated unexpectedly.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        force: {
+          type: "boolean",
+          description: "Force reclaim of the lock if the holding process has terminated. If false or omitted, inspects current lock state without altering it.",
+        },
+        root: {
+          type: "string",
+          description: "Optional repository root path. Defaults to current working directory.",
+        },
+      },
+    },
+  },
+  handler: async (args) => {
+    try {
+      const root = resolveRoot(args);
+      const force = Boolean(args.force);
+      if (!force) {
+        const info = inspectLock(root);
+        return jsonResult({
+          waymark: 1,
+          kind: "recover-lock",
+          ok: true,
+          recovered: false,
+          locked: info.locked,
+          active: info.active,
+          owner: info.owner,
+          message: !info.locked
+            ? "No active lock exists"
+            : info.active
+              ? `Lock owner PID ${info.owner?.pid} is actively running`
+              : `Lock owner PID ${info.owner?.pid} has terminated. Call with force: true to reclaim.`,
+        });
+      }
+      const result = recoverLock(root, true);
+      return jsonResult({
+        waymark: 1,
+        kind: "recover-lock",
+        ok: true,
+        ...result,
+      });
+    } catch (error) {
+      return errorResult(error);
+    }
+  },
+};
+
 export const WAYMARK_TOOLS: McpToolHandler[] = [
   waymarkInitTool,
   waymarkStatusTool,
@@ -581,4 +633,5 @@ export const WAYMARK_TOOLS: McpToolHandler[] = [
   waymarkResumeTool,
   waymarkCompleteTool,
   waymarkAbandonTool,
+  waymarkRecoverLockTool,
 ];

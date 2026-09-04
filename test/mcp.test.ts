@@ -732,5 +732,107 @@ test("Test B: Lifecycle hook filters non-compact events to prevent duplicate rep
   }
 });
 
+test("MCP server executes waymark_recover_lock inspection and forced reclaim", async () => {
+  const repo = setupTempRepo();
+  try {
+    const server = new McpServer();
+    await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "waymark_init", arguments: { profile: "recording", root: repo } },
+    }));
+
+    // 1. When no lock exists
+    const noLockRes = await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "waymark_recover_lock", arguments: { force: false, root: repo } },
+    }));
+    assert.ok(noLockRes);
+    const noLockParsed = JSON.parse(JSON.parse(noLockRes).result.content[0].text);
+    assert.equal(noLockParsed.ok, true);
+    assert.equal(noLockParsed.recovered, false);
+    assert.equal(noLockParsed.locked, false);
+
+    // 2. Simulate an orphaned lock left by dead process
+    const lockDir = path.join(repo, ".waymark", "locks", "active");
+    fs.mkdirSync(lockDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(lockDir, "metadata.json"),
+      JSON.stringify({ pid: 99999999, nodeVersion: "v22.0.0", startTime: new Date().toISOString(), cwd: repo, token: "dead-token" }) + "\n",
+      "utf8",
+    );
+
+    // 3. Normal begin fails with BUSY
+    const busyRes = await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "waymark_begin", arguments: { question: "Attempt while busy", root: repo } },
+    }));
+    assert.ok(busyRes);
+    const busyParsed = JSON.parse(JSON.parse(busyRes).result.content[0].text);
+    assert.equal(busyParsed.ok, false);
+    assert.equal(busyParsed.code, "BUSY");
+
+    // 4. Inspection shows lock is held by dead PID
+    const inspectRes = await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: { name: "waymark_recover_lock", arguments: { force: false, root: repo } },
+    }));
+    assert.ok(inspectRes);
+    const inspectParsed = JSON.parse(JSON.parse(inspectRes).result.content[0].text);
+    assert.equal(inspectParsed.ok, true);
+    assert.equal(inspectParsed.recovered, false);
+    assert.equal(inspectParsed.locked, true);
+    assert.equal(inspectParsed.active, false);
+    assert.equal(inspectParsed.owner.pid, 99999999);
+
+    // 5. Force recovery reclaims the orphaned lock
+    const recoverRes = await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 5,
+      method: "tools/call",
+      params: { name: "waymark_recover_lock", arguments: { force: true, root: repo } },
+    }));
+    assert.ok(recoverRes);
+    const recoverParsed = JSON.parse(JSON.parse(recoverRes).result.content[0].text);
+    assert.equal(recoverParsed.ok, true);
+    assert.equal(recoverParsed.recovered, true);
+    assert.equal(recoverParsed.previous.pid, 99999999);
+
+    // 6. Now waymark_begin succeeds cleanly
+    const beginRes = await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 6,
+      method: "tools/call",
+      params: { name: "waymark_begin", arguments: { question: "After recovery", root: repo } },
+    }));
+    assert.ok(beginRes);
+    const beginParsed = JSON.parse(JSON.parse(beginRes).result.content[0].text);
+    assert.equal(beginParsed.ok, true);
+    assert.ok(beginParsed.id);
+
+    // 7. No lock remaining after completion
+    const livePidRes = await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 7,
+      method: "tools/call",
+      params: { name: "waymark_recover_lock", arguments: { force: true, root: repo } },
+    }));
+    assert.ok(livePidRes);
+    const afterBeginRecover = JSON.parse(JSON.parse(livePidRes).result.content[0].text);
+    assert.equal(afterBeginRecover.ok, true);
+    assert.equal(afterBeginRecover.recovered, false);
+  } finally {
+    cleanupTempRepo(repo);
+  }
+});
+
+
 
 
