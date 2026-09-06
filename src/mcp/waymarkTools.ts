@@ -28,6 +28,7 @@ import { anchorForRange, normalizeRelativePath, repoRoot, repositoryProvenance }
 import { checkTrajectory } from "../integrity.js";
 import { serializeResume } from "../resumeSerializer.js";
 import { publish } from "../capnAdapter.js";
+import { discoverSymbolsInFile } from "../astExtractor.js";
 import { McpToolCallResult, McpToolHandler } from "./types.js";
 
 async function withLock<T>(root: string, callback: () => Promise<T> | T): Promise<T> {
@@ -624,6 +625,43 @@ export const waymarkRecoverLockTool: McpToolHandler = {
   },
 };
 
+export const waymarkDiscoverSymbolsTool: McpToolHandler = {
+  definition: {
+    name: "waymark_discover_symbols",
+    description: "Discover syntax symbols in one repository-relative file without changing Waymark state.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Repository-relative source file path.",
+        },
+        language: {
+          type: "string",
+          enum: ["typescript", "python"],
+          description: "Optional source language when the file extension is not sufficient.",
+        },
+        root: {
+          type: "string",
+          description: "Optional repository root path. Defaults to current working directory.",
+        },
+      },
+      required: ["path"],
+    },
+  },
+  handler: async (args) => {
+    try {
+      const root = resolveRoot(args);
+      const storedPath = typeof args.path === "string" ? args.path.trim() : "";
+      const language = typeof args.language === "string" ? args.language : undefined;
+      if (!storedPath) throw new WaymarkError("MISSING_ARGUMENT", "path is required");
+      return jsonResult(await discoverSymbolsInFile(root, storedPath, language));
+    } catch (error) {
+      return errorResult(error);
+    }
+  },
+};
+
 export const WAYMARK_TOOLS: McpToolHandler[] = [
   waymarkInitTool,
   waymarkStatusTool,
@@ -634,4 +672,5 @@ export const WAYMARK_TOOLS: McpToolHandler[] = [
   waymarkCompleteTool,
   waymarkAbandonTool,
   waymarkRecoverLockTool,
+  waymarkDiscoverSymbolsTool,
 ];

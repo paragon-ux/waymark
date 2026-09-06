@@ -35,6 +35,7 @@ import { anchorForRange, normalizeRelativePath, nowIso, repoRoot, repositoryProv
 import { checkTrajectory } from "./integrity.js";
 import { serializeResume } from "./resumeSerializer.js";
 import { ask as capnAsk, publish } from "./capnAdapter.js";
+import { discoverSymbolsInFile } from "./astExtractor.js";
 
 interface ParsedArgs {
   positionals: string[];
@@ -47,7 +48,7 @@ interface CommandResult {
   exitCode?: number;
 }
 
-const VALUE_FLAGS = new Set(["profile", "path", "label", "start", "end", "inference", "capn-executable"]);
+const VALUE_FLAGS = new Set(["profile", "path", "label", "start", "end", "inference", "language", "capn-executable"]);
 const BOOLEAN_FLAGS = new Set(["active", "porcelain", "compact", "force", "apply"]);
 
 function parseArgs(args: readonly string[]): ParsedArgs {
@@ -207,6 +208,7 @@ async function runCommand(command: string, rawArgs: readonly string[]): Promise<
         "  check --active --porcelain",
         "  resume --compact",
         "  context | ask <question> | complete <id> <answer>",
+        "  discover-symbols --path <repository-relative-file> [--language typescript|python]",
         "  abandon <id> | status --porcelain | recover-lock --force",
         "  dump-trajectory <id> | prune [--apply]",
         "  mcp (starts stdio MCP server for native agent tools)",
@@ -230,6 +232,11 @@ async function runCommand(command: string, rawArgs: readonly string[]): Promise<
   if (command === "recover-lock") {
     const result = recoverLock(root, parsed.flags.has("force"));
     return { value: { waymark: 1, kind: "recover-lock", ok: true, ...result } };
+  }
+
+  if (command === "discover-symbols") {
+    const storedPath = requiredValue(parsed, "path");
+    return { value: await discoverSymbolsInFile(root, storedPath, parsed.values.get("language")) };
   }
 
   const config = readConfig(root);

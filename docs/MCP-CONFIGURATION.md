@@ -70,6 +70,7 @@ Run both continuity tools and Capn discovery tools in a single combined process:
 | **`waymark_status`** | *(none)* | Retrieve current trajectory status (`NONE`, `STAGED`, `MOVED`, `STALE`, `CROSS_BRANCH`). |
 | **`waymark_abandon`** | `reason: string` | Discard an active trajectory cleanly without publishing findings. |
 | **`waymark_init`** | `profile: string` | Configure repository workspace profiles. |
+| **`waymark_discover_symbols`** | `path: string`, optional `language: typescript|python`, optional `root: string` | Read-only structured symbol discovery through the bundled Tree-sitter WASM grammar. |
 
 #### MCP Resources & Prompts:
 - **`waymark://context`**: Exposes the active trajectory status and verified breadcrumb trail as a readable resource.

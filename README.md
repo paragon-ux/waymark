@@ -107,6 +107,14 @@ Register Waymark in your agent's MCP configuration (`mcpServers` in Claude Deskt
 ```
 *(For modular Capn episodic memory or unified single-process mode, see [MCP Server Configuration](docs/MCP-CONFIGURATION.md)).*
 
+For read-only TypeScript or Python symbol discovery without creating a trajectory:
+
+```bash
+node dist/src/cli.js discover-symbols --path src/example.ts --language typescript
+```
+
+MCP clients can call the equivalent `waymark_discover_symbols` tool.
+
 ### 3. Add the Proactive Agent Directive
 Add this 4-rule instruction to your project's persistent rules (`CLAUDE.md`, `.cursor/rules/waymark.mdc`, or harness system prompt):
 
