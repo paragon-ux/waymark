@@ -1,10 +1,10 @@
 # STATE -- live project authority
 
-Last updated: 2026-09-02.
+Last updated: 2026-09-05.
 
 ## Current phase
 
-**Phase 10 -- Polyglot WebAssembly AST discovery engine, two-phase discovery router, empirical 25-query mixed benchmark, and v1.6.0 release: DONE.** Implemented in-process WebAssembly Tree-sitter engine supporting 30+ languages for sub-second AST call-graph tracing and exact symbol line ranges; converted capn_ask into a dual-phase discovery router cascading between memory and in-process AST; validated 25-query mixed benchmark with 100% precision (25/25), 1.36s avg latency, and 0 background daemons; expanded unit/integration test suite to 39 tests with zero failures; overhauled documentation architecture with TOC and visual repository directory; tagged v1.6.0 release.
+**Phase 11 -- Standalone CLI lifecycle and quarantine harness, token budget assertions, and v1.7.0 release: DONE.** Added comprehensive standalone CLI lifecycle test harness in `test/standaloneHarness.test.ts`; verified full CLI lifecycle (`init` -> `begin` -> `note` -> `check` -> `resume` -> `complete`/`abandon`); verified crash resilience, dead PID detection, and forced lock recovery; verified 3-hop token budget (<250 tokens) and 15-hop bounded byte truncation (<=2048 bytes); verified `STALE` and `CROSS_BRANCH` quarantine; expanded test suite to 53 tests with zero failures; tagged v1.7.0 release.
 
 ## Phase plan
 
@@ -19,6 +19,7 @@ Last updated: 2026-09-02.
 - Phase 8 -- linear audit, MCP decoupling, indexed benchmark baseline, and v1.4.0 release. **DONE**
 - Phase 9 -- dynamic utility lab, ecosystem lifecycle proof, and v1.5.0 production-stable release. **DONE**
 - Phase 10 -- polyglot WebAssembly AST discovery, two-phase discovery router, and v1.6.0 release. **DONE**
+- Phase 11 -- Standalone CLI lifecycle and quarantine harness, token budget assertions, and v1.7.0 release. **DONE**
 
 ## Verified locally
 
@@ -27,7 +28,7 @@ Last updated: 2026-09-02.
 - The registered reload hook returned Waymark `AGENTS.md` and its SHA-256 in a
   direct executable smoke test.
 - `npm ci`, TypeScript build, Node tests, MCP test suite, schema validation, and public hygiene checks pass locally.
-- 39/39 tests pass with zero failures.
+- 53/53 tests pass with zero failures.
 - The suite covers MCP tools/lifecycle, relocation, stale and cross-branch quarantine, torn journal
   recovery, locks, serializer bounds, path safety, hook suppression, and Capn
   argv behavior.

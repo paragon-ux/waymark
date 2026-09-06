@@ -1,6 +1,6 @@
 {
   "name": "waymark",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "private": true,
   "description": "A lightweight active investigation ledger and WebAssembly discovery MCP server for AI coding agent continuity.",
   "type": "module",

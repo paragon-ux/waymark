@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.7.0
+
+- **Standalone CLI Lifecycle & Quarantine Harness:** Added `test/standaloneHarness.test.ts` delivering comprehensive integration coverage for the standalone Waymark CLI independent of Arbiter or agent wrappers.
+- **Full CLI Lifecycle Validation:** Automated end-to-end execution of `init` -> `begin` -> `note` -> `check` -> `resume --compact` -> `complete` and `abandon` subcommands.
+- **Dead PID Detection & Lock Reclamation:** Verified active lock detection, process liveness checking via OS signals, `recover-lock` diagnosis, and forced lock clearance.
+- **Token & Bounded Byte Budget Assertions:** Verified standard 3-hop traces (<250 tokens) and verified 15-hop truncation bounds (strictly <= 2048 bytes / `MAX_RESUME_BYTES`) preserving newest hops with `truncated: true`.
+- **Integrity Drift & Cross-Branch Quarantine:** Verified deterministic exit code 2 on file modification (`STALE`) and branch switching (`CROSS_BRANCH`).
+- **Expanded Test Suite:** Expanded total test suite to 53 unit and integration tests passing cleanly.
+
 ## 1.6.0
 
 - **In-Process WebAssembly AST Discovery Engine:** Integrated pure WebAssembly `web-tree-sitter` and pre-compiled grammars (`tree-sitter-wasms`) covering 30+ languages (TS, JS, Python, Go, Rust, Java, C/C++, C#, Ruby, PHP, Swift, Bash, etc.). Extracts symbols (including arrow functions), exact 1-indexed line spans, caller/callee trees, and entrypoints in <50ms with zero native C++ compilation (no node-gyp/MSVC) and zero background daemons.
