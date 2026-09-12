@@ -6,3 +6,4 @@ This directory provides concrete, copy-pasteable configuration templates and rul
 - **[`cursor/`](cursor/)**: Cursor & Cursor Composer integration (`.cursor/rules/waymark.mdc` and MCP config).
 - **[`codex/`](codex/)**: OpenAI Codex integration (`hooks.json` lifecycle hook and MCP config).
 - **[`agy/`](agy/)**: Google Antigravity integration (`.gemini/rules/waymark.md` and `PreInvocation` hook).
+- **[`hermes/`](hermes/)**: Hermes Agent integration (native `mcp_servers` config and the compaction-gated `pre_llm_call` shell hook).

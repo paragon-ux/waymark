@@ -1,6 +1,6 @@
 {
   "name": "waymark",
-  "version": "1.8.0",
+  "version": "1.8.2",
   "private": true,
   "description": "A lightweight active investigation ledger and WebAssembly discovery MCP server for AI coding agent continuity.",
   "type": "module",
@@ -30,10 +30,11 @@
     "@types/node": "^22.15.0",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
+    "capn-hook": "0.2.2",
     "typescript": "^5.8.3"
   },
   "dependencies": {
     "tree-sitter-wasms": "^0.1.13",
-    "web-tree-sitter": "^0.24.0"
+    "web-tree-sitter": "0.24.0"
   }
 }

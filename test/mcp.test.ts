@@ -3,11 +3,37 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { CAPN_RESOURCES, McpServer, WAYMARK_PROMPTS, WAYMARK_RESOURCES } from "../src/mcp/server.js";
 import { WAYMARK_TOOLS } from "../src/mcp/waymarkTools.js";
 import { CAPN_TOOLS } from "../src/mcp/capnTools.js";
 import { initWorkspace, writeConfig } from "../src/journal.js";
+
+// The REAL capn CLI surface for MCP adapter tests: test/capnHarness.mjs runs
+// actual capn-hook code with lexical recall standardized (embedding: false).
+const CAPN_HARNESS = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  /^(dist|build)[\\/]/u.test(path.relative(path.resolve(process.cwd()), path.dirname(fileURLToPath(import.meta.url)))) ? "../../test" : "",
+  "capnHarness.mjs",
+);
+
+// Windows wrapper .cmd exercising the adapter's cmd.exe path; POSIX .sh otherwise.
+function capnExecutableFor(root: string): string {
+  if (process.platform === "win32") {
+    const cmdPath = path.join(root, "capn.cmd");
+    fs.writeFileSync(
+      cmdPath,
+      ["@echo off", `"${process.execPath}" "${CAPN_HARNESS}" %*`, ""].join("\r\n"),
+      "utf8",
+    );
+    return cmdPath;
+  }
+  const shPath = path.join(root, "capn.sh");
+  fs.writeFileSync(shPath, `#!/bin/sh\nexec "${process.execPath}" "${CAPN_HARNESS}" "$@"\n`, "utf8");
+  fs.chmodSync(shPath, 0o755);
+  return shPath;
+}
 
 function setupTempRepo(): string {
   const tempDir = fs.mkdtempSync(path.join(process.cwd(), ".tmp-mcp-test-"));
@@ -402,33 +428,36 @@ test("Capn ask MCP tool forwards charted hit payload and miss matches", async ()
     assert.equal(missData.status, "miss");
     assert.deepEqual(missData.matches, []);
 
-    // 2. Ask with a simulated hit via fake-capn script
-    const fakeScript = process.platform === "win32"
-      ? path.resolve(process.cwd(), "test", "fake-capn.cmd")
-      : path.resolve(process.cwd(), "test", "fake-capn-miss.mjs");
+    // 2. Ask through the REAL capn CLI surface (capnHarness: actual capn-hook
+    //    code with lexical recall). Seed a chart via capn chart, then ask.
+    const capn = (...args: string[]) =>
+      execFileSync(process.execPath, [CAPN_HARNESS, ...args], {
+        cwd: repo, encoding: "utf8", windowsHide: true, timeout: 60_000,
+      });
 
-    if (process.platform === "win32") {
-      writeConfig(repo, { waymark: 1, profile: "capn-cli", capnExecutable: fakeScript, maxRelocationWindows: 2000 });
-      const hitRes = await server.handleMessage(JSON.stringify({
-        jsonrpc: "2.0",
-        id: 2,
-        method: "tools/call",
-        params: {
-          name: "capn_ask",
-          arguments: {
-            root: repo,
-            question: "How does authentication work?",
-            capn_executable: fakeScript,
-          },
+    capn("chart", "How does authentication work?", "--files", "sample.ts", "--details", "JWT bearer tokens verified in auth middleware.");
+
+    writeConfig(repo, { waymark: 1, profile: "capn-cli", capnExecutable: "capn", maxRelocationWindows: 2000 });
+    const hitRes = await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "capn_ask",
+        arguments: {
+          root: repo,
+          question: "How does authentication work?",
+          capn_executable: capnExecutableFor(repo),
         },
-      }));
-      assert.ok(hitRes);
-      const hitParsed = JSON.parse(hitRes);
-      const hitData = JSON.parse(hitParsed.result.content[0].text);
-      assert.equal(hitData.status, "hit");
-      assert.ok(hitData.result, "Expected result field in hit response");
-      assert.ok(String(hitData.result).includes("How does authentication work"));
-    }
+      },
+    }));
+    assert.ok(hitRes);
+    const hitParsed = JSON.parse(hitRes);
+    const hitData = JSON.parse(hitParsed.result.content[0].text);
+    assert.equal(hitData.provider, "capn-cli");
+    assert.equal(hitData.status, "hit");
+    assert.ok(hitData.result, "Expected result field in hit response");
+    assert.match(JSON.stringify(hitData.result), /How does authentication work/u);
   } finally {
     cleanupTempRepo(repo);
   }
@@ -727,6 +756,240 @@ test("Test B: Lifecycle hook filters non-compact events to prevent duplicate rep
     } finally {
       fs.rmSync(outsideRepo, { recursive: true, force: true });
     }
+  } finally {
+    cleanupTempRepo(repo);
+  }
+});
+
+test("Hermes pre_llm_call shell hook injects the resume packet only on compaction handoffs", async () => {
+  const repo = setupTempRepo();
+  try {
+    initWorkspace(repo, "recording");
+    const hookScript = path.resolve(process.cwd(), "scripts", "hooks", "waymark-compact-hook.mjs");
+    const server = new McpServer({
+      name: "waymark-mcp",
+      tools: WAYMARK_TOOLS,
+      resources: WAYMARK_RESOURCES,
+      prompts: WAYMARK_PROMPTS,
+    });
+    const sampleFile = path.join(repo, "auth.ts");
+    fs.writeFileSync(sampleFile, "export function verifySignature() {\n  return true;\n}\n");
+    execFileSync("git", ["add", "auth.ts"], { cwd: repo, windowsHide: true });
+    execFileSync("git", ["commit", "-m", "add auth.ts"], { cwd: repo, windowsHide: true });
+
+    const beginRes = await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 50,
+      method: "tools/call",
+      params: {
+        name: "waymark_begin",
+        arguments: { root: repo, question: "Hermes compaction continuity" },
+      },
+    }));
+    assert.ok(beginRes);
+    const beginData = JSON.parse(JSON.parse(beginRes).result.content[0].text);
+
+    await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 51,
+      method: "tools/call",
+      params: {
+        name: "waymark_note",
+        arguments: {
+          root: repo,
+          trajectory_id: String(beginData.id),
+          path: "auth.ts",
+          label: "hermes-hop",
+          start_line: 1,
+          end_line: 3,
+          inference: "Verifies hermes-hop after compaction",
+        },
+      },
+    }));
+
+    const hermesPayload = (sessionId: string, userMessage: string, lastUserContent: string, metadata = false) => JSON.stringify({
+      hook_event_name: "pre_llm_call",
+      session_id: sessionId,
+      cwd: repo,
+      extra: {
+        user_message: userMessage,
+        conversation_history: [
+          { role: "user", content: "earlier turn" },
+          { role: "assistant", content: "answer" },
+          metadata
+            ? { role: "user", content: lastUserContent, _compressed_summary: true }
+            : { role: "user", content: lastUserContent },
+        ],
+        is_first_turn: false,
+        model: "test-model",
+        platform: "cli",
+      },
+    });
+
+    const summaryPrefix = "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted into the summary below.";
+
+    // 1. Metadata-flagged compaction row + live user message -> injects the breadcrumb block
+    //    as a {"context": ...} JSON line (Hermes compacts at turn start, so the immediate
+    //    post-compaction turn carries one)
+    const compactOut = execFileSync(process.execPath, [hookScript], {
+      input: hermesPayload("hermes-sess-1", "continue the work", "summary row", true),
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    const compactPayload = JSON.parse(compactOut) as { context: string };
+    assert.match(compactPayload.context, /\[Waymark\] Active Investigation Resumed Post-Compaction/);
+    assert.match(compactPayload.context, /Hermes compaction continuity/);
+    assert.match(compactPayload.context, /hermes-hop/);
+
+    // 2. Same session, SAME summary again -> deduped {} no-op JSON line
+    const dedupeOut = execFileSync(process.execPath, [hookScript], {
+      input: hermesPayload("hermes-sess-1", "next turn", "summary row", true),
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    assert.equal(dedupeOut.trim(), "{}");
+
+    // 2b. Same session, DIFFERENT summary content (still metadata-flagged) ->
+    //    fires again: the dedupe identity is the summary-text hash, not a
+    //    constant, so two distinct compactions in one session never swallow
+    //    each other within the TTL
+    const secondCompactOut = execFileSync(process.execPath, [hookScript], {
+      input: hermesPayload("hermes-sess-1", "continue again", "a NEW compaction summary", true),
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    const secondCompactPayload = JSON.parse(secondCompactOut) as { context: string };
+    assert.match(secondCompactPayload.context, /hermes-hop/);
+
+    // 3. Different session id -> fires again
+    const secondSessOut = execFileSync(process.execPath, [hookScript], {
+      input: hermesPayload("hermes-sess-2", "continue the work", "summary row", true),
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    const secondSessPayload = JSON.parse(secondSessOut) as { context: string };
+    assert.match(secondSessPayload.context, /hermes-hop/);
+
+    // 4. Ordinary turn without compaction signals -> {} no-op JSON line
+    const ordinaryOut = execFileSync(process.execPath, [hookScript], {
+      input: hermesPayload("hermes-sess-3", "hello", "a normal question"),
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    assert.equal(ordinaryOut.trim(), "{}");
+
+    // 5. Content-marker fallbacks (for rows that lost "_" metadata in transit): summary prefix,
+    //    continuation marker, fallback heading, merged carrier -> all inject as JSON context
+    const contentCases = [
+      summaryPrefix,
+      "Continue from the compressed conversation context above. This marker exists because no human user turn was available.",
+      "## Historical Task Snapshot\nUser asked: 'demo'",
+      "kept task text\n\n[END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]\n[CONTEXT COMPACTION — REFERENCE ONLY] summary body",
+    ];
+    let sessCounter = 10;
+    for (const content of contentCases) {
+      const out = execFileSync(process.execPath, [hookScript], {
+        input: hermesPayload(`hermes-sess-${sessCounter++}`, "continue", content),
+        encoding: "utf8",
+        windowsHide: true,
+      });
+      const payload = JSON.parse(out) as { context: string };
+      assert.match(payload.context, /hermes-hop/, `content-marker fallback should fire for: ${content.slice(0, 40)}`);
+    }
+
+    // 6. Forced CLI format emits the raw markdown block without a stdin gate
+    //    (CLI/human mode, unlike the gated shell-hook JSON path above)
+    const cliOut = execFileSync(process.execPath, [hookScript, "--format=hermes", `--root=${repo}`], {
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    assert.match(cliOut, /\[Waymark\] Active Investigation Resumed Post-Compaction/);
+  } finally {
+    cleanupTempRepo(repo);
+  }
+});
+
+test("Hermes shell hook answers one JSON line even on internal failure", async () => {
+  const repo = setupTempRepo();
+  try {
+    initWorkspace(repo, "recording");
+    const hookScript = path.resolve(process.cwd(), "scripts", "hooks", "waymark-compact-hook.mjs");
+    const server = new McpServer({
+      name: "waymark-mcp",
+      tools: WAYMARK_TOOLS,
+      resources: WAYMARK_RESOURCES,
+      prompts: WAYMARK_PROMPTS,
+    });
+    const sampleFile = path.join(repo, "auth.ts");
+    fs.writeFileSync(sampleFile, "export function verifySignature() {\n  return true;\n}\n");
+    execFileSync("git", ["add", "auth.ts"], { cwd: repo, windowsHide: true });
+    execFileSync("git", ["commit", "-m", "add auth.ts"], { cwd: repo, windowsHide: true });
+
+    const beginRes = await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 60,
+      method: "tools/call",
+      params: {
+        name: "waymark_begin",
+        arguments: { root: repo, question: "Crash path contract" },
+      },
+    }));
+    assert.ok(beginRes);
+    const beginData = JSON.parse(JSON.parse(beginRes).result.content[0].text);
+    await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 61,
+      method: "tools/call",
+      params: {
+        name: "waymark_note",
+        arguments: {
+          root: repo,
+          trajectory_id: String(beginData.id),
+          path: "auth.ts",
+          label: "crash-hop",
+          start_line: 1,
+          end_line: 3,
+          inference: "Seeds a real active trajectory before the failure",
+        },
+      },
+    }));
+
+    const crashPayload = (lastUserContent: string) => JSON.stringify({
+      hook_event_name: "pre_llm_call",
+      session_id: "hermes-crash-sess-1",
+      cwd: repo,
+      extra: {
+        user_message: "continue the work",
+        conversation_history: [
+          { role: "user", content: "earlier turn" },
+          { role: "user", content: lastUserContent, _compressed_summary: true },
+        ],
+        is_first_turn: false,
+        model: "test-model",
+        platform: "cli",
+      },
+    });
+
+    // Real internal failure: .waymark/config.json is deleted AFTER a live
+    // waymark_begin seeded an active trajectory, so readActivePointer succeeds
+    // and loadActiveTrajectory's replay reaches readConfig -> NOT_INITIALIZED
+    // escapes runHook into the top-level catch.
+    const configPath = path.join(repo, ".waymark", "config.json");
+    fs.rmSync(configPath, { force: true });
+
+    const crash = spawnSync(process.execPath, [hookScript], {
+      input: crashPayload("summary row"),
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    // Exit stays 0 (fail-open), stdout is exactly one JSON line, and the
+    // NOT_INITIALIZED diagnostic went to stderr — proving the throw actually
+    // traversed the top-level catch rather than a silent no-op return.
+    assert.equal(crash.status, 0);
+    const parsedCrash = JSON.parse(crash.stdout) as { context?: string };
+    assert.equal(parsedCrash.context, undefined);
+    assert.match(crash.stdout.trim(), /^\{\}$/);
+    assert.match(crash.stderr, /NOT_INITIALIZED|Run waymark init before using the project/i);
   } finally {
     cleanupTempRepo(repo);
   }

@@ -403,11 +403,15 @@ async function main(): Promise<void> {
   try {
     const result = await runCommand(command, args);
     if (result.value !== null) output(result.value);
-    process.exitCode = result.exitCode ?? 0;
+    // web-tree-sitter's Emscripten runtime leaves teardown hooks on the event loop
+    // after any parse; a graceful drain adds seconds of 0%-CPU latency per one-shot
+    // CLI call (documented upstream: emscripten-core/emscripten#12801). All output is
+    // flushed synchronously by this point, so hard-exit with the intended code.
+    process.exit(result.exitCode ?? 0);
   } catch (error) {
     const result = errorOutput(error);
     output(result.value);
-    process.exitCode = result.exitCode ?? 1;
+    process.exit(result.exitCode ?? 1);
   }
 }
 

@@ -32,12 +32,19 @@ function quoteCmdArgument(value: string): string {
   return `"${value.replace(/["^&|<>]/gu, "^$&")}"`;
 }
 
-function resolveWindowsCommand(executable: string): string {
+export function resolveWindowsExecutable(executable: string): string {
   if (path.extname(executable).toLowerCase() === ".cmd" || path.extname(executable).toLowerCase() === ".bat") return executable;
   try {
     const output = execFileSync("where.exe", [executable], { encoding: "utf8", windowsHide: true, timeout: 5000 });
-    const first = output.split(/\r?\n/u).map((line) => line.trim()).find(Boolean);
-    return first ?? executable;
+    const candidates = output.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
+    // where.exe lists the extensionless POSIX shim (e.g. `npm\capn`) before the
+    // PATHEXT-executable `.cmd`; CreateProcessW cannot run the shim, so prefer
+    // a .cmd/.bat hit and only fall back to the first candidate.
+    const executableHit = candidates.find((c) => {
+      const ext = path.extname(c).toLowerCase();
+      return ext === ".cmd" || ext === ".bat" || ext === ".exe";
+    });
+    return executableHit ?? candidates[0] ?? executable;
   } catch {
     return executable;
   }
@@ -45,7 +52,7 @@ function resolveWindowsCommand(executable: string): string {
 
 function commandSpec(executable: string, args: readonly string[]): CommandSpec {
   if (process.platform !== "win32") return { file: executable, args: [...args] };
-  const resolved = resolveWindowsCommand(executable);
+  const resolved = resolveWindowsExecutable(executable);
   const extension = path.extname(resolved).toLowerCase();
   if (extension !== ".cmd" && extension !== ".bat") return { file: resolved, args: [...args] };
   const commandLine = [resolved, ...args].map(quoteCmdArgument).join(" ");
@@ -64,7 +71,8 @@ async function execute(root: string, executable: string, args: readonly string[]
 }
 
 export function capnChartArgs(question: string, answer: string, files: readonly string[]): string[] {
-  return ["chart", question, answer, ...uniqueFiles(files).flatMap((file) => ["--files", file])];
+  // capn-hook >= 0.2: the answer moved from a positional to --details.
+  return ["chart", question, ...uniqueFiles(files).flatMap((file) => ["--files", file]), "--details", answer];
 }
 
 export async function publish(
@@ -152,10 +160,17 @@ export async function ask(
         return { waymark: 1, kind: "ask", provider: "capn-cli", status: "hit", result: digestOutput(stdout) };
       }
     }
+    return { waymark: 1, kind: "ask", provider: "capn-cli", status: "miss", matches: [] };
   } catch (error) {
+    // Capn signals a miss with exit code 1 + "No charted answer." on stderr; that is a
+    // normal miss, not an adapter failure — surface it as such.
+    const candidate = error as { message?: string; stderr?: string; stdout?: string; code?: string | number };
+    const combined = `${candidate.stdout || ""}\n${candidate.stderr || ""}`;
+    if (combined.includes("No charted answer.") || candidate.code === 1) {
+      return { waymark: 1, kind: "ask", provider: "capn-cli", status: "miss", matches: [] };
+    }
     // If Capn errored and AST intent wasn't checked yet, try AST as fallback
     if (!intent.requiresParser) {
-      const candidate = error as { message?: string; stderr?: string; code?: string | number };
       return {
         waymark: 1,
         kind: "ask",
