@@ -6,8 +6,10 @@
  * This executable script supports multiple agent harnesses:
  * - OpenAI Codex: Handles SessionStart (compact) JSON-RPC stdin/stdout contracts.
  * - Antigravity (Agy): Handles PreInvocation injectSteps protocol.
- * - Hermes Agent: Handles pre_llm_call shell-hook payloads (fires only when the
- *   conversation history shows a compaction handoff and no live user turn).
+ * - Hermes Agent: Handles pre_llm_call shell-hook payloads (fires on the
+ *   first turn whose history contains a compaction handoff, live user turn
+ *   included; deduped per session_id + summary identity) and answers with
+ *   JSON {"context": ...} stdout lines on that gated path.
  * - Claude Code & CLI: Emits clean Markdown or structured JSON.
  *
  * Usage:
@@ -255,9 +257,12 @@ async function runHook() {
         rootCandidate = null;
       }
       if (detected && shouldFireForCompaction(stdinPayload, detected.summaryRow, rootCandidate || rootForGate)) {
-        effectiveFormat = "hermes";
+        effectiveFormat = "hermes-shell";
         if (stdinPayload.cwd) resolvedRoot = stdinPayload.cwd;
       } else {
+        // Hermes shell hooks must answer with valid JSON or Hermes logs an
+        // invalid-stdout warning; "{}" parses as a no-op context response.
+        process.stdout.write("{}\n");
         return;
       }
     } else if (stdinPayload.workspacePaths || stdinPayload.invocationNum !== undefined) {
@@ -285,7 +290,7 @@ async function runHook() {
   try {
     root = repoRoot(resolvedRoot);
   } catch {
-    if (effectiveFormat === "codex" || effectiveFormat === "agy") {
+    if (effectiveFormat === "codex" || effectiveFormat === "agy" || effectiveFormat === "hermes-shell") {
       process.stdout.write("{}\n");
     }
     return;
@@ -295,14 +300,14 @@ async function runHook() {
   try {
     pointer = readActivePointer(root);
   } catch {
-    if (effectiveFormat === "codex" || effectiveFormat === "agy") {
+    if (effectiveFormat === "codex" || effectiveFormat === "agy" || effectiveFormat === "hermes-shell") {
       process.stdout.write("{}\n");
     }
     return;
   }
 
   if (!pointer || pointer.status === "NONE") {
-    if (effectiveFormat === "codex" || effectiveFormat === "agy") {
+    if (effectiveFormat === "codex" || effectiveFormat === "agy" || effectiveFormat === "hermes-shell") {
       process.stdout.write("{}\n");
     }
     return;
@@ -310,7 +315,7 @@ async function runHook() {
 
   const state = loadActiveTrajectory(root);
   if (!state) {
-    if (effectiveFormat === "codex" || effectiveFormat === "agy") {
+    if (effectiveFormat === "codex" || effectiveFormat === "agy" || effectiveFormat === "hermes-shell") {
       process.stdout.write("{}\n");
     }
     return;
@@ -406,6 +411,15 @@ async function runHook() {
       ],
     };
     process.stdout.write(`${JSON.stringify(agyOutput)}\n`);
+    return;
+  }
+
+  if (effectiveFormat === "hermes-shell") {
+    // Hermes shell-hook path: Hermes parses hook stdout as JSON and accepts
+    // only {"context": "<string>"} (agent/shell_hooks.py _parse_response /
+    // _parse_context). Do not truncate: Hermes spills oversized context to
+    // disk itself (hooks.output_spill.max_chars, default 10000).
+    process.stdout.write(`${JSON.stringify({ context: markdownBlock })}\n`);
     return;
   }
 

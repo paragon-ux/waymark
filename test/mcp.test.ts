@@ -829,23 +829,25 @@ test("Hermes pre_llm_call shell hook injects the resume packet only on compactio
     const summaryPrefix = "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted into the summary below.";
 
     // 1. Metadata-flagged compaction row + live user message -> injects the breadcrumb block
-    //    (Hermes compacts at turn start, so the immediate post-compaction turn carries one)
+    //    as a {"context": ...} JSON line (Hermes compacts at turn start, so the immediate
+    //    post-compaction turn carries one)
     const compactOut = execFileSync(process.execPath, [hookScript], {
       input: hermesPayload("hermes-sess-1", "continue the work", "summary row", true),
       encoding: "utf8",
       windowsHide: true,
     });
-    assert.match(compactOut, /\[Waymark\] Active Investigation Resumed Post-Compaction/);
-    assert.match(compactOut, /Hermes compaction continuity/);
-    assert.match(compactOut, /hermes-hop/);
+    const compactPayload = JSON.parse(compactOut) as { context: string };
+    assert.match(compactPayload.context, /\[Waymark\] Active Investigation Resumed Post-Compaction/);
+    assert.match(compactPayload.context, /Hermes compaction continuity/);
+    assert.match(compactPayload.context, /hermes-hop/);
 
-    // 2. Same session, SAME summary again -> deduped silent no-op
+    // 2. Same session, SAME summary again -> deduped {} no-op JSON line
     const dedupeOut = execFileSync(process.execPath, [hookScript], {
       input: hermesPayload("hermes-sess-1", "next turn", "summary row", true),
       encoding: "utf8",
       windowsHide: true,
     });
-    assert.equal(dedupeOut.trim(), "");
+    assert.equal(dedupeOut.trim(), "{}");
 
     // 3. Different session id -> fires again
     const secondSessOut = execFileSync(process.execPath, [hookScript], {
@@ -853,18 +855,19 @@ test("Hermes pre_llm_call shell hook injects the resume packet only on compactio
       encoding: "utf8",
       windowsHide: true,
     });
-    assert.match(secondSessOut, /hermes-hop/);
+    const secondSessPayload = JSON.parse(secondSessOut) as { context: string };
+    assert.match(secondSessPayload.context, /hermes-hop/);
 
-    // 4. Ordinary turn without compaction signals -> silent no-op
+    // 4. Ordinary turn without compaction signals -> {} no-op JSON line
     const ordinaryOut = execFileSync(process.execPath, [hookScript], {
       input: hermesPayload("hermes-sess-3", "hello", "a normal question"),
       encoding: "utf8",
       windowsHide: true,
     });
-    assert.equal(ordinaryOut.trim(), "");
+    assert.equal(ordinaryOut.trim(), "{}");
 
     // 5. Content-marker fallbacks (for rows that lost "_" metadata in transit): summary prefix,
-    //    continuation marker, fallback heading, merged carrier -> all inject
+    //    continuation marker, fallback heading, merged carrier -> all inject as JSON context
     const contentCases = [
       summaryPrefix,
       "Continue from the compressed conversation context above. This marker exists because no human user turn was available.",
@@ -878,10 +881,12 @@ test("Hermes pre_llm_call shell hook injects the resume packet only on compactio
         encoding: "utf8",
         windowsHide: true,
       });
-      assert.match(out, /hermes-hop/, `content-marker fallback should fire for: ${content.slice(0, 40)}`);
+      const payload = JSON.parse(out) as { context: string };
+      assert.match(payload.context, /hermes-hop/, `content-marker fallback should fire for: ${content.slice(0, 40)}`);
     }
 
-    // 6. Forced CLI format emits the same block without a stdin gate
+    // 6. Forced CLI format emits the raw markdown block without a stdin gate
+    //    (CLI/human mode, unlike the gated shell-hook JSON path above)
     const cliOut = execFileSync(process.execPath, [hookScript, "--format=hermes", `--root=${repo}`], {
       encoding: "utf8",
       windowsHide: true,

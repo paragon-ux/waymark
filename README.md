@@ -73,7 +73,7 @@ Agent harnesses provide varying levels of context-injection capability, categori
 
 | Support Tier | Mechanism | Delivery Guarantee | Target Harnesses |
 | :--- | :--- | :--- | :--- |
-| **Tier 1: Active Lifecycle Hook** | Out-of-context process execution on compaction boundary. | **100% deterministic.** Instructions and breadcrumbs prepended before model turn; zero tokens spent remembering to recover. | **OpenAI Codex** (`SessionStart`), **Google Antigravity** (`PreInvocation.injectSteps`), **Claude Code** (`post_compact`), **Hermes Agent** (`pre_llm_call` shell hook). |
+| **Tier 1: Active Lifecycle Hook** | Out-of-context process execution on compaction boundary. | **100% deterministic.** Instructions and breadcrumbs prepended before model turn; zero tokens spent remembering to recover. | **OpenAI Codex** (`SessionStart`), **Google Antigravity** (`PreInvocation.injectSteps`), **Claude Code** (`post_compact`), **Hermes Agent** (`pre_llm_call` shell hook — fires on the first turn whose history contains a compaction handoff, live user message included, deduped per session + summary identity). |
 | **Tier 2: MCP Ingestion** | In-band Model Context Protocol primitives. | **High reliability.** Standardized pull; model accesses context via subscribed URIs (`waymark://context`) or prompt commands. | **Claude Code**, **Cursor Composer**, **Windsurf**, **Cline**, **Hermes Agent** (`mcp_servers`). |
 | **Tier 3: Persistent Directives** | Sticky system instruction files (`CLAUDE.md`, `.cursor/rules/*.mdc`). | **Best-effort.** Instructs model to call `waymark_resume()` as step 1 when prior turn history is rolled. | **Cursor**, **Claude Code**, **Antigravity**, **Hermes Agent** (`AGENTS.md` context-file loading). |
 

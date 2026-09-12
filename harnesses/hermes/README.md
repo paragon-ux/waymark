@@ -37,7 +37,7 @@ This is the recommended integration: the agent pulls verified resume packets on 
 
 `scripts/hooks/waymark-compact-hook.mjs` detects Hermes' `pre_llm_call` shell-hook payload and — **on the first turn whose conversation history contains a compaction handoff (live user message included; Hermes compacts at turn start, so the immediate post-compaction turn normally carries one)** — emits the bounded resume packet as the hook's context injection. A per-session dedupe (`session_id` + summary identity, state in `.waymark/hermes-compact-hook-state.json`, 12 h TTL) keeps the persisting summary row from re-triggering later turns.
 
-Hermes marks the post-compaction boundary with a metadata flag and byte-pinned summary prefixes in a `role="user"` row (`[CONTEXT COMPACTION — REFERENCE ONLY]…`, the no-user-turn continuation marker, the `## Historical Task Snapshot` deterministic fallback, or a merged summary after `[END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]`). The hook prefers Hermes' in-process `_compressed_summary` row metadata (content-independent, survives the hook payload) and falls back to these byte-pinned markers only when metadata was stripped in transit; ordinary turns without any compaction handoff return nothing. Once a given summary has been delivered once for a session, the dedupe keeps later turns silent.
+Hermes marks the post-compaction boundary with a metadata flag and byte-pinned summary prefixes in a `role="user"` row (`[CONTEXT COMPACTION — REFERENCE ONLY]…`, the no-user-turn continuation marker, the `## Historical Task Snapshot` deterministic fallback, or a merged summary after `[END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]`). The hook prefers Hermes' in-process `_compressed_summary` row metadata (content-independent, survives the hook payload) and falls back to these byte-pinned markers only when metadata was stripped in transit; ordinary turns without any compaction handoff answer with a `{}` no-op JSON line. Once a given summary has been delivered once for a session, the dedupe answers later turns with the same no-op.
 
 ### Registration
 
@@ -78,9 +78,9 @@ The hook resolves the repository from `cwd` (falling back to `--root`), so no pe
 
 ### Response contract (stdout)
 
-On a compaction-gated turn with an active Waymark trajectory, the hook prints the same bounded markdown breadcrumb block it emits for the `markdown` format (question, status, verified hop trail, next action). With no active trajectory — or on ordinary turns — it prints nothing, and Hermes contributes no context. The hook fails open: errors log to stderr and never block the agent loop.
+Shell-hook invocations always answer with a single JSON line. On a compaction-gated turn with an active Waymark trajectory, the hook prints `{"context": "<markdown breadcrumb block>"}` — the same bounded markdown it emits for the `markdown` format (question, status, verified hop trail, next action), carried as the `context` string Hermes parses from hook stdout (`agent/shell_hooks.py` `_parse_response` / `_parse_context`). Do not expect raw markdown on this path; the context string is not truncated — Hermes spills oversized context to disk itself, bounded by `hooks.output_spill.max_chars` (default 10,000 chars). On every non-injection path — ordinary turns without a compaction handoff, deduped repeats, no active trajectory, no pointer, or repository-resolution errors — the hook prints `{}` instead of nothing, so Hermes always receives valid no-op JSON and contributes no context. The hook fails open: errors log to stderr and never block the agent loop.
 
-Manual CLI check (no compaction gate in forced-format mode):
+Raw markdown is printed only when the format is forced for humans/CLI (no compaction gate, no shell-hook stdin payload):
 
 ```sh
 node scripts/hooks/waymark-compact-hook.mjs --format=hermes --root=<REPO_ROOT>
