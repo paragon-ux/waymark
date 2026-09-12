@@ -32,8 +32,10 @@ function makeRepo(files: Record<string, string>): string {
   // os.tmpdir() can return the Windows 8.3 short form (C:\Users\RUNNER~1\...).
   // The capn adapter tests execute a .cmd inside this directory via cmd.exe,
   // where quote-collapsed short paths with `~` fail ("not recognized as an
-  // internal or external command"); canonicalize to the long form.
-  const root = realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "waymark-test-")));
+  // internal or external command"); canonicalize to the long form. The
+  // NATIVE realpath is required: the JS realpath resolves symlinks but does
+  // not expand 8.3 short names.
+  const root = realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "waymark-test-")));
   git(root, ["init", "-q"]);
   git(root, ["config", "user.email", "test@example.com"]);
   git(root, ["config", "user.name", "Waymark Tests"]);
