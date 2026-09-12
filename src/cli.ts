@@ -88,8 +88,24 @@ function boundedText(value: string, maximum: number, label: string, allowEmpty =
   return value;
 }
 
+function writeAllSync(fd: number, payload: Buffer): void {
+  let offset = 0;
+  while (offset < payload.length) {
+    offset += fs.writeSync(fd, payload, offset, payload.length - offset);
+  }
+}
+
 function output(value: unknown): void {
-  process.stdout.write(`${JSON.stringify(value)}\n`);
+  // Blocking write: process.stdout is async-buffered on pipes, and the
+  // Emscripten-avoidance hard exit below would otherwise truncate pending
+  // bytes on large piped responses (consumer receives invalid JSON).
+  try {
+    writeAllSync(1, Buffer.from(`${JSON.stringify(value)}\n`, "utf8"));
+  } catch {
+    // fd 1 unwritable (closed/non-blocking edge): best-effort async fallback
+    // so the error still surfaces instead of crashing the CLI.
+    process.stdout.write(`${JSON.stringify(value)}\n`);
+  }
 }
 
 function errorOutput(error: unknown): CommandResult {

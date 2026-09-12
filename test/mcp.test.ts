@@ -861,6 +861,30 @@ test("Hermes pre_llm_call shell hook injects the resume packet only on compactio
     const secondCompactPayload = JSON.parse(secondCompactOut) as { context: string };
     assert.match(secondCompactPayload.context, /hermes-hop/);
 
+    // 2c. Failed-injection retry: the dedupe commit only happens after a
+    //    successful injection, so a transient post-gate failure must NOT
+    //    consume the 12h retry window. Prove it with a real failure on a FRESH
+    //    session (so only the crash, not an earlier mark, is in play): delete
+    //    .waymark/config.json so the hook errors after the gate (the crash
+    //    path answers {}), then restore it and retry — the retry must inject,
+    //    proving the failed run never marked the boundary fired.
+    const crashRepoConfig = path.join(repo, ".waymark", "config.json");
+    fs.rmSync(crashRepoConfig, { force: true });
+    const failedOut = execFileSync(process.execPath, [hookScript], {
+      input: hermesPayload("hermes-sess-retry", "retry turn", "summary row", true),
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    assert.equal(failedOut.trim(), "{}");
+    fs.writeFileSync(crashRepoConfig, JSON.stringify({ waymark: 1, profile: "recording", capnExecutable: "capn", maxRelocationWindows: 2000 }), "utf8");
+    const retryOut = execFileSync(process.execPath, [hookScript], {
+      input: hermesPayload("hermes-sess-retry", "retry turn", "summary row", true),
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    const retryPayload = JSON.parse(retryOut) as { context: string };
+    assert.match(retryPayload.context, /hermes-hop/);
+
     // 3. Different session id -> fires again
     const secondSessOut = execFileSync(process.execPath, [hookScript], {
       input: hermesPayload("hermes-sess-2", "continue the work", "summary row", true),
@@ -904,6 +928,44 @@ test("Hermes pre_llm_call shell hook injects the resume packet only on compactio
       windowsHide: true,
     });
     assert.match(cliOut, /\[Waymark\] Active Investigation Resumed Post-Compaction/);
+
+    // 7. Byte cap: the markdown block honors the 2048-byte resume contract —
+    //    seed 14 maximum-size hops (plus the pre-existing hermes-hop = 15
+    //    total) on untracked module files (no new commit, so the existing hop
+    //    provenance stays FRESH); the block must stay within
+    //    MAX_RESUME_BYTES (2048) with older hops dropped, not inject an
+    //    uncapped context.
+    for (let i = 0; i < 14; i += 1) {
+      fs.writeFileSync(path.join(repo, `module-${i}.ts`), `// module ${i}\n` + "filler\n".repeat(i + 2), "utf8");
+      const hopRes = await server.handleMessage(JSON.stringify({
+        jsonrpc: "2.0",
+        id: 70 + i,
+        method: "tools/call",
+        params: {
+          name: "waymark_note",
+          arguments: {
+            root: repo,
+            trajectory_id: String(beginData.id),
+            path: `module-${i}.ts`,
+            label: `L${i}-${"x".repeat(108)}`,
+            start_line: 1 + i,
+            end_line: 2 + i,
+            inference: `Verifies hop ${i} ${"y".repeat(140)}`,
+          },
+        },
+      }));
+      assert.ok(hopRes);
+      const hopData = JSON.parse(JSON.parse(String(hopRes)).result.content[0].text);
+      assert.equal(hopData.ok, true, `note ${i} must be accepted: ${JSON.stringify(hopData)}`);
+    }
+
+    const cappedOut = execFileSync(process.execPath, [hookScript, "--format=hermes", `--root=${repo}`], {
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    assert.ok(cappedOut.length <= 2048, `markdown block must honor the 2048-byte cap, got ${cappedOut.length}`);
+    assert.match(cappedOut, /omitted to keep this packet bounded/);
+    assert.match(cappedOut, /L13-/u, "newest hops must survive the cap; oldest dropped first");
   } finally {
     cleanupTempRepo(repo);
   }

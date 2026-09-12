@@ -23,7 +23,26 @@ import process from "node:process";
 import { readConfig, loadActiveTrajectory, readActivePointer } from "../../dist/src/journal.js";
 import { repoRoot } from "../../dist/src/paths.js";
 import { checkTrajectory } from "../../dist/src/integrity.js";
-import { serializeResume } from "../../dist/src/resumeSerializer.js";
+import { MAX_RESUME_BYTES, serializeResume } from "../../dist/src/resumeSerializer.js";
+
+// Hermes parses hook stdout as JSON, so every response — including the crash
+// path — must be exactly one JSON line. process.stdout is async-buffered on
+// pipes and the fail-open hard exit would truncate pending bytes on large
+// blocks, so responses are written with blocking fs.writeSync(1, ...) before
+// the hard exit.
+function respond(value) {
+  try {
+    const payload = Buffer.from(value, "utf8");
+    let offset = 0;
+    while (offset < payload.length) {
+      offset += fs.writeSync(1, payload, offset, payload.length - offset);
+    }
+    return;
+  } catch {
+    // fd 1 unwritable: fall through to the async stream (last resort).
+  }
+  process.stdout.write(value);
+}
 
 // Hermes compaction markers (agent/context_compressor.py). The summary handoff is a
 // role="user" row starting with one of these prefixes; content markers are byte-pinned
@@ -152,6 +171,12 @@ function hermesStatePath(root) {
 }
 
 function shouldFireForCompaction(payload, summaryRow, root) {
+  // READ-ONLY eligibility check: does this session+summary deserve a fresh
+  // injection? Marking the boundary fired is a separate commit step so a
+  // failure between the gate and the injection cannot consume the compaction's
+  // 12h retry window (a transient crash would otherwise suppress the
+  // breadcrumb permanently — the state file must only record what was actually
+  // delivered).
   const sessionId = typeof payload.session_id === "string" && payload.session_id
     ? payload.session_id
     : null;
@@ -168,9 +193,26 @@ function shouldFireForCompaction(payload, summaryRow, root) {
   }
   const key = `${sessionId}:${summaryRowIdentity(summaryRow)}`;
   const fired = typeof state[key] === "number" ? state[key] : 0;
-  if (fired && Date.now() - fired < 12 * 60 * 60 * 1000) {
-    return false;
+  return !(fired && Date.now() - fired < 12 * 60 * 60 * 1000);
+}
+
+function markCompactionFired(payload, summaryRow, root) {
+  // COMMIT step: persist the fired timestamp only AFTER a successful
+  // injection. Best-effort: a failed write only means a possible duplicate
+  // injection, never a missed one.
+  const sessionId = typeof payload.session_id === "string" && payload.session_id
+    ? payload.session_id
+    : null;
+  if (!sessionId) return;
+  const statePath = hermesStatePath(root);
+  let state = {};
+  try {
+    state = JSON.parse(fs.readFileSync(statePath, "utf8"));
+    if (!state || typeof state !== "object") state = {};
+  } catch {
+    state = {};
   }
+  const key = `${sessionId}:${summaryRowIdentity(summaryRow)}`;
   state[key] = Date.now();
   // Prune entries older than 7 days so the file cannot grow unbounded.
   for (const [k, v] of Object.entries(state)) {
@@ -184,7 +226,6 @@ function shouldFireForCompaction(payload, summaryRow, root) {
   } catch {
     // best-effort
   }
-  return true;
 }
 
 async function runHook() {
@@ -195,6 +236,10 @@ async function runHook() {
   // Auto-detect format if not explicitly forced
   let effectiveFormat = explicitFormat;
   let resolvedRoot = customRoot;
+  // The detected compaction row for the gated Hermes path; the dedupe commit
+  // runs only after the injection is actually written to stdout (BUG: marking
+  // fired at gate time let transient post-gate failures consume the 12h retry).
+  let hermesDetectedRow = null;
 
   if (!effectiveFormat && stdinPayload) {
     if (stdinPayload.hook_event_name === "SessionStart") {
@@ -213,11 +258,12 @@ async function runHook() {
       }
       if (detected && shouldFireForCompaction(stdinPayload, detected.summaryRow, rootCandidate || rootForGate)) {
         effectiveFormat = "hermes-shell";
+        hermesDetectedRow = detected.summaryRow;
         if (stdinPayload.cwd) resolvedRoot = stdinPayload.cwd;
       } else {
         // Hermes shell hooks must answer with valid JSON or Hermes logs an
         // invalid-stdout warning; "{}" parses as a no-op context response.
-        process.stdout.write("{}\n");
+        respond("{}\n");
         return;
       }
     } else if (stdinPayload.workspacePaths || stdinPayload.invocationNum !== undefined) {
@@ -237,7 +283,7 @@ async function runHook() {
 
   // For Codex: if event is not compact and not forced, return no-op
   if (effectiveFormat === "codex" && stdinPayload && stdinPayload.source && stdinPayload.source !== "compact") {
-    process.stdout.write("{}\n");
+    respond("{}\n");
     return;
   }
 
@@ -246,7 +292,7 @@ async function runHook() {
     root = repoRoot(resolvedRoot);
   } catch {
     if (effectiveFormat === "codex" || effectiveFormat === "agy" || effectiveFormat === "hermes-shell") {
-      process.stdout.write("{}\n");
+      respond("{}\n");
     }
     return;
   }
@@ -256,14 +302,14 @@ async function runHook() {
     pointer = readActivePointer(root);
   } catch {
     if (effectiveFormat === "codex" || effectiveFormat === "agy" || effectiveFormat === "hermes-shell") {
-      process.stdout.write("{}\n");
+      respond("{}\n");
     }
     return;
   }
 
   if (!pointer || pointer.status === "NONE") {
     if (effectiveFormat === "codex" || effectiveFormat === "agy" || effectiveFormat === "hermes-shell") {
-      process.stdout.write("{}\n");
+      respond("{}\n");
     }
     return;
   }
@@ -271,7 +317,7 @@ async function runHook() {
   const state = loadActiveTrajectory(root);
   if (!state) {
     if (effectiveFormat === "codex" || effectiveFormat === "agy" || effectiveFormat === "hermes-shell") {
-      process.stdout.write("{}\n");
+      respond("{}\n");
     }
     return;
   }
@@ -312,39 +358,65 @@ async function runHook() {
   });
 
   if (effectiveFormat === "json") {
-    process.stdout.write(`${JSON.stringify(resume.packet, null, 2)}\n`);
+    respond(`${JSON.stringify(resume.packet, null, 2)}\n`);
     return;
   }
 
-  // Build markdown breadcrumb context
-  const lines = [
-    "### [Waymark] Active Investigation Resumed Post-Compaction",
-    `**Question:** ${state.question}`,
-    `**Status:** \`${report.status}\` | **Verified Through Hop:** ${report.verifiedThrough} / ${report.totalSteps - 1}`,
-    `**Next Recommended Action:** \`${nextAction}\``,
-    "",
-    "#### Verified Breadcrumb Trail:",
-  ];
-
-  if (trusted.length === 0) {
-    lines.push("- (No verified hops recorded yet)");
-  } else {
-    for (const hop of trusted) {
-      const movedNotice = hop.status === "MOVED" ? " *(Relocated in file)*" : "";
-      lines.push(`- **Hop ${hop.index}** [${hop.label}] [\`${hop.path}\`${movedNotice}]: ${hop.inference}`);
+  // Build markdown breadcrumb context from the CAPPED packet (not the raw
+  // trusted array): serializeResume drops oldest hops until the packet fits
+  // MAX_RESUME_BYTES, and the markdown must honor the same bound — an uncapped
+  // block would exceed both the Waymark resume contract and Hermes' configured
+  // spill threshold on long trajectories. The framed block below enforces the
+  // same ceiling after formatting: if the framed block still exceeds the cap,
+  // drop oldest hops until it fits (falling back to the packet's compact
+  // result, which is already within the bound).
+  const packetHops = resume.packet.hops;
+  const buildBlock = (hops) => {
+    const omittedCount = Math.max(0, (resume.packet.omittedBefore ?? 0)) + Math.max(0, packetHops.length - hops.length);
+    const lines = [
+      "### [Waymark] Active Investigation Resumed Post-Compaction",
+      `**Question:** ${state.question}`,
+      `**Status:** \`${report.status}\` | **Verified Through Hop:** ${report.verifiedThrough} / ${report.totalSteps - 1}`,
+      `**Next Recommended Action:** \`${nextAction}\``,
+      "",
+      "#### Verified Breadcrumb Trail:",
+    ];
+    if (hops.length === 0) {
+      lines.push("- (No verified hops recorded yet)");
+    } else {
+      if (omittedCount > 0) {
+        lines.push(`- *(…${omittedCount} earlier verified hop${omittedCount === 1 ? "" : "s"} omitted to keep this packet bounded)*`);
+      }
+      for (const hop of hops) {
+        const movedNotice = hop.status === "MOVED" ? " *(Relocated in file)*" : "";
+        lines.push(`- **Hop ${hop.index}** [${hop.label}] [\`${hop.path}\`${movedNotice}]: ${hop.inference}`);
+      }
     }
-  }
-
-  if (report.staleReasons.length > 0) {
+    if (report.staleReasons.length > 0) {
+      lines.push("");
+      lines.push(`**Integrity Warning:** ${report.staleReasons.slice(0, 2).join("; ")}`);
+    }
     lines.push("");
-    lines.push(`**Integrity Warning:** ${report.staleReasons.join("; ")}`);
+    lines.push("*(Continue investigation from the verified hop above using `waymark_note`)*");
+    lines.push("");
+    return lines.join("\n");
+  };
+
+  let markdownBlock = buildBlock(packetHops);
+  // Enforce the byte ceiling on the framed block: same drop-oldest policy as
+  // serializeResume. The packet already fits the cap, so if the framed block
+  // exceeds it we shrink the hop list toward the packet's own bounded shape —
+  // worst case the packet's compact single-hop list renders under the cap.
+  let blockHops = [...packetHops];
+  while (Buffer.byteLength(markdownBlock, "utf8") > MAX_RESUME_BYTES && blockHops.length > 1) {
+    blockHops = blockHops.slice(1);
+    markdownBlock = buildBlock(blockHops);
   }
-
-  lines.push("");
-  lines.push("*(Continue investigation from the verified hop above using `waymark_note`)*");
-  lines.push("");
-
-  const markdownBlock = lines.join("\n");
+  if (Buffer.byteLength(markdownBlock, "utf8") > MAX_RESUME_BYTES) {
+    // Single-hop block still over the cap (pathological header sizes): fall
+    // back to the capped JSON packet itself — the bounded contract wins.
+    markdownBlock = `### [Waymark] Active Investigation Resumed Post-Compaction\n\n\`\`\`json\n${resume.json}\n\`\`\`\n\n*(Full structured resume packet above; markdown rendering skipped to honor the ${MAX_RESUME_BYTES}-byte bound.)*`;
+  }
 
   if (effectiveFormat === "codex") {
     const codexOutput = {
@@ -353,7 +425,7 @@ async function runHook() {
         additionalContext: markdownBlock,
       },
     };
-    process.stdout.write(`${JSON.stringify(codexOutput)}\n`);
+    respond(`${JSON.stringify(codexOutput)}\n`);
     return;
   }
 
@@ -365,20 +437,26 @@ async function runHook() {
         },
       ],
     };
-    process.stdout.write(`${JSON.stringify(agyOutput)}\n`);
+    respond(`${JSON.stringify(agyOutput)}\n`);
     return;
   }
 
   if (effectiveFormat === "hermes-shell") {
     // Hermes shell-hook path: Hermes parses hook stdout as JSON and accepts
     // only {"context": "<string>"} (agent/shell_hooks.py _parse_response /
-    // _parse_context). Do not truncate: Hermes spills oversized context to
-    // disk itself (hooks.output_spill.max_chars, default 10000).
-    process.stdout.write(`${JSON.stringify({ context: markdownBlock })}\n`);
+    // _parse_context). Oversized context spills to disk Hermes-side
+    // (hooks.output_spill.max_chars, default 10000), but the block itself is
+    // already byte-bounded below to honor the resume contract.
+    respond(`${JSON.stringify({ context: markdownBlock })}\n`);
+    // Dedupe commit happens only now: the injection is actually delivered, so
+    // a crash before this point leaves the boundary eligible for retry.
+    if (hermesDetectedRow) {
+      markCompactionFired(stdinPayload, hermesDetectedRow, root);
+    }
     return;
   }
 
-  process.stdout.write(`${markdownBlock}\n`);
+  respond(`${markdownBlock}\n`);
 }
 
 try {
@@ -389,6 +467,6 @@ try {
   // hook stdout as JSON, so even the crash path must answer one JSON line —
   // empty stdout is logged as "shell hook stdout was not valid JSON".
   process.stderr.write(`[waymark-compact-hook] Error: ${err.message}\n`);
-  process.stdout.write("{}\n");
+  respond("{}\n");
   process.exit(0);
 }

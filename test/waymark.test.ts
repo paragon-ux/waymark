@@ -61,13 +61,22 @@ const CAPN_HARNESS = path.resolve(
 );
 
 async function capnTestExecutable(root: string): Promise<string> {
-  // Verify capn-hook is reachable before returning the executable so a missing
-  // install fails with a clear message instead of a confusing adapter error.
+  // Verify capn-hook is reachable AND fully initialize the recall store: the
+  // bare `list` probe partially creates .capn (config + entries but no recall
+  // collection), leaving `ask` to fail with "capn recall is not initialized."
+  // — an adapter error, NOT a charted miss. Tests that expect a real miss need
+  // a genuinely initialized store.
   const probe = spawnSync(process.execPath, [CAPN_HARNESS, "list"], {
     cwd: root, encoding: "utf8", windowsHide: true, timeout: 30_000,
   });
   if (probe.status === 2 || (probe.stderr || "").includes("capnHarness: capn-hook not found")) {
     throw new Error(`capn-hook is required for capn adapter tests: ${probe.stderr || probe.stdout}`);
+  }
+  const init = spawnSync(process.execPath, [CAPN_HARNESS, "init"], {
+    cwd: root, encoding: "utf8", windowsHide: true, timeout: 30_000,
+  });
+  if (init.status !== 0) {
+    throw new Error(`capn init failed for test store: ${init.stderr || init.stdout}`);
   }
   if (process.platform === "win32") {
     // A .cmd wrapper so the adapter's Windows path (cmd.exe /c + quoting) is
@@ -166,6 +175,44 @@ test("Capn ask treats exit code 1 (charted miss) as a miss, not an adapter error
   const result = await capnAsk(root, "capn-cli", executable, "another question");
   assert.equal(result.status, "miss");
   assert.equal((result as { error?: string }).error, undefined);
+});
+
+test("Capn ask classifies an uninitialized store as an error, not a miss", async () => {
+  // capn-hook 0.2.2 exits 1 for setup failures too (verified against the real
+  // CLI: `capn ask` without an initialized recall store exits 1 with "capn
+  // recall is not initialized." and no miss marker). Exit code alone cannot
+  // distinguish a miss from an adapter failure — only the documented
+  // "No charted answer." marker is a miss.
+  const root = makeRepo({ "src/flow.ts": "line\n" });
+  const executable = await capnTestExecutable(root);
+  // Remove the store capnTestExecutable just initialized: a real `ask` then
+  // fails with the setup failure, no "No charted answer." marker.
+  fs.rmSync(path.join(root, ".capn"), { recursive: true, force: true });
+  const result = await capnAsk(root, "capn-cli", executable, "where is the config");
+  assert.equal(result.status, "error");
+  assert.match(String((result as { error?: string }).error ?? ""), /not initialized|CAPN_ERROR|recall/iu);
+});
+
+test("CLI writes large piped JSON completely before the hard exit", () => {
+  // process.stdout is async-buffered on pipes; process.exit would truncate a
+  // large pending write. output() must use the blocking fs.writeSync(1) path
+  // so a piped consumer always receives complete JSON (Emscripten-avoidance
+  // hard exit stays, so this must hold without a graceful drain).
+  const root = makeRepo({ "src/flow.ts": "line\n".repeat(500) });
+  initialize(root);
+  const id = begin(root, "Large piped output regression");
+  for (let i = 1; i <= 12; i += 1) {
+    const added = note(root, id, i, i + 1);
+    assert.equal(added.code, 0, `note ${i} failed: ${JSON.stringify(added.value)}`);
+  }
+  // check --active serializes every hop; the fixture must produce a payload
+  // large enough that a non-blocking pipe write could truncate it if the CLI
+  // exited before flushing (the regression this test guards).
+  const result = runCli(root, ["check", "--active"]);
+  assert.equal(result.code, 0);
+  const serialized = JSON.stringify(result.value);
+  assert.ok(serialized.length > 2000, `fixture must produce a large payload, got ${serialized.length} chars`);
+  assert.equal((result.value as { hops?: unknown[] }).hops?.length, 12);
 });
 
 test("Windows executable resolution prefers the PATHEXT .cmd over the extensionless POSIX shim", { skip: process.platform !== "win32" }, () => {

@@ -162,24 +162,25 @@ export async function ask(
     }
     return { waymark: 1, kind: "ask", provider: "capn-cli", status: "miss", matches: [] };
   } catch (error) {
-    // Capn signals a miss with exit code 1 + "No charted answer." on stderr; that is a
-    // normal miss, not an adapter failure — surface it as such.
+    // Capn 0.2.2 signals a charted miss with exit code 1 + "No charted answer." on
+    // stderr — but it ALSO exits 1 for setup/storage failures (e.g. an
+    // uninitialized recall store), so the numeric code alone cannot classify.
+    // Only the documented miss marker counts as a miss; EVERY other failure —
+    // AST-intent questions included — follows the adapter error path. (The
+    // historical AST fall-through to "miss" masked genuine setup failures:
+    // the same uninitialized-store error reported "error" for plain questions
+    // and "miss" for AST questions.)
     const candidate = error as { message?: string; stderr?: string; stdout?: string; code?: string | number };
     const combined = `${candidate.stdout || ""}\n${candidate.stderr || ""}`;
-    if (combined.includes("No charted answer.") || candidate.code === 1) {
+    if (combined.includes("No charted answer.")) {
       return { waymark: 1, kind: "ask", provider: "capn-cli", status: "miss", matches: [] };
     }
-    // If Capn errored and AST intent wasn't checked yet, try AST as fallback
-    if (!intent.requiresParser) {
-      return {
-        waymark: 1,
-        kind: "ask",
-        provider: "capn-cli",
-        status: "error",
-        error: digestOutput(`${candidate.code ?? "CAPN_ERROR"}: ${candidate.stderr || candidate.message || "Capn ask failed"}`),
-      };
-    }
+    return {
+      waymark: 1,
+      kind: "ask",
+      provider: "capn-cli",
+      status: "error",
+      error: digestOutput(`${candidate.code ?? "CAPN_ERROR"}: ${candidate.stderr || candidate.message || "Capn ask failed"}`),
+    };
   }
-
-  return { waymark: 1, kind: "ask", provider: "capn-cli", status: "miss", matches: [] };
 }
