@@ -6,27 +6,28 @@
 // model download, behavior identical to a production `capn` invocation.
 //
 // Location of capn-hook, in order:
-//   1. $CAPN_HOOK_DIST        (explicit override)
-//   2. ./node_modules/capn-hook  (project-local install)
-//   3. the global npm tree (this machine's install)
+//   1. $CAPN_HOOK_DIST             (explicit override)
+//   2. this repo's node_modules    (devDependency; npm ci installs it)
+//   3. the global npm tree         (local machine convenience)
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+
 function findCapnEntry() {
   if (process.env.CAPN_HOOK_DIST) return path.resolve(process.env.CAPN_HOOK_DIST);
-  const require = createRequire(path.resolve(process.cwd(), "noop.js"));
-  const packageJsonPath = (() => {
-    try {
-      return require.resolve("capn-hook/package.json");
-    } catch {
-      return null;
-    }
-  })();
-  if (packageJsonPath) {
+  // Devdependency of this repository: resolve relative to the harness file so the
+  // temp-repo cwd the tests run in never matters.
+  const require = createRequire(path.join(HERE, "resolver-anchor.js"));
+  try {
+    const packageJsonPath = require.resolve("capn-hook/package.json");
     const entry = path.join(path.dirname(packageJsonPath), "dist", "capn.js");
     if (fs.existsSync(entry)) return entry;
+  } catch {
+    // fall through to the global tree
   }
   const globalNpm = process.platform === "win32" && process.env.APPDATA
     ? path.join(process.env.APPDATA, "npm", "node_modules", "capn-hook", "dist", "capn.js")
