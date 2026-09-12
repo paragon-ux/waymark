@@ -17,6 +17,14 @@
 - [Repository Directory](#repository-directory)
 - [Deep-Dive Documentation](#deep-dive-documentation)
 - [Build & Verify](#build--verify)
+- [Framing & Efficiency](#framing--efficiency)
+
+---
+
+## Framing & Efficiency
+
+- **[FRAMING.md](FRAMING.md)**: Why Waymark exists — one server covering both stages of the agent coding cycle: symbolic+semantic discovery for cheap cold starts, a verified in-flight journal, and a compaction hook for deterministic continuity, with token cost bounded at every stage.
+- **[EFFICIENCY_REPORT.md](EFFICIENCY_REPORT.md)**: v1.8.2 performance & token-cost audit — measured grammar pre-warming (~30× discovery latency fix), capn adapter fixes, hook dedupe bounds, injected-packet token accounting (~216-token recovery vs ~6,675 cold), and the documented external teardown limitation.
 
 ---
 
