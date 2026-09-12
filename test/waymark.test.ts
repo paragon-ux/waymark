@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { Ajv as AjvClass } from "ajv";
 import addFormatsPlugin from "ajv-formats";
+import { realpathSync } from "node:fs";
 import { acquireLock, recoverLock } from "../src/lock.js";
 import { initWorkspace, loadActiveTrajectory, readJournalEvents, replayTrajectory, trajectoryPath } from "../src/journal.js";
 import { serializeResume } from "../src/resumeSerializer.js";
@@ -28,7 +29,11 @@ function git(root: string, args: readonly string[]): string {
 }
 
 function makeRepo(files: Record<string, string>): string {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "waymark-test-"));
+  // os.tmpdir() can return the Windows 8.3 short form (C:\Users\RUNNER~1\...).
+  // The capn adapter tests execute a .cmd inside this directory via cmd.exe,
+  // where quote-collapsed short paths with `~` fail ("not recognized as an
+  // internal or external command"); canonicalize to the long form.
+  const root = realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "waymark-test-")));
   git(root, ["init", "-q"]);
   git(root, ["config", "user.email", "test@example.com"]);
   git(root, ["config", "user.name", "Waymark Tests"]);
