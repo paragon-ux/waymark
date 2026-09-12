@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { CAPN_RESOURCES, McpServer, WAYMARK_PROMPTS, WAYMARK_RESOURCES } from "../src/mcp/server.js";
 import { WAYMARK_TOOLS } from "../src/mcp/waymarkTools.js";
@@ -849,6 +849,18 @@ test("Hermes pre_llm_call shell hook injects the resume packet only on compactio
     });
     assert.equal(dedupeOut.trim(), "{}");
 
+    // 2b. Same session, DIFFERENT summary content (still metadata-flagged) ->
+    //    fires again: the dedupe identity is the summary-text hash, not a
+    //    constant, so two distinct compactions in one session never swallow
+    //    each other within the TTL
+    const secondCompactOut = execFileSync(process.execPath, [hookScript], {
+      input: hermesPayload("hermes-sess-1", "continue again", "a NEW compaction summary", true),
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    const secondCompactPayload = JSON.parse(secondCompactOut) as { context: string };
+    assert.match(secondCompactPayload.context, /hermes-hop/);
+
     // 3. Different session id -> fires again
     const secondSessOut = execFileSync(process.execPath, [hookScript], {
       input: hermesPayload("hermes-sess-2", "continue the work", "summary row", true),
@@ -892,6 +904,92 @@ test("Hermes pre_llm_call shell hook injects the resume packet only on compactio
       windowsHide: true,
     });
     assert.match(cliOut, /\[Waymark\] Active Investigation Resumed Post-Compaction/);
+  } finally {
+    cleanupTempRepo(repo);
+  }
+});
+
+test("Hermes shell hook answers one JSON line even on internal failure", async () => {
+  const repo = setupTempRepo();
+  try {
+    initWorkspace(repo, "recording");
+    const hookScript = path.resolve(process.cwd(), "scripts", "hooks", "waymark-compact-hook.mjs");
+    const server = new McpServer({
+      name: "waymark-mcp",
+      tools: WAYMARK_TOOLS,
+      resources: WAYMARK_RESOURCES,
+      prompts: WAYMARK_PROMPTS,
+    });
+    const sampleFile = path.join(repo, "auth.ts");
+    fs.writeFileSync(sampleFile, "export function verifySignature() {\n  return true;\n}\n");
+    execFileSync("git", ["add", "auth.ts"], { cwd: repo, windowsHide: true });
+    execFileSync("git", ["commit", "-m", "add auth.ts"], { cwd: repo, windowsHide: true });
+
+    const beginRes = await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 60,
+      method: "tools/call",
+      params: {
+        name: "waymark_begin",
+        arguments: { root: repo, question: "Crash path contract" },
+      },
+    }));
+    assert.ok(beginRes);
+    const beginData = JSON.parse(JSON.parse(beginRes).result.content[0].text);
+    await server.handleMessage(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 61,
+      method: "tools/call",
+      params: {
+        name: "waymark_note",
+        arguments: {
+          root: repo,
+          trajectory_id: String(beginData.id),
+          path: "auth.ts",
+          label: "crash-hop",
+          start_line: 1,
+          end_line: 3,
+          inference: "Seeds a real active trajectory before the failure",
+        },
+      },
+    }));
+
+    const crashPayload = (lastUserContent: string) => JSON.stringify({
+      hook_event_name: "pre_llm_call",
+      session_id: "hermes-crash-sess-1",
+      cwd: repo,
+      extra: {
+        user_message: "continue the work",
+        conversation_history: [
+          { role: "user", content: "earlier turn" },
+          { role: "user", content: lastUserContent, _compressed_summary: true },
+        ],
+        is_first_turn: false,
+        model: "test-model",
+        platform: "cli",
+      },
+    });
+
+    // Real internal failure: .waymark/config.json is deleted AFTER a live
+    // waymark_begin seeded an active trajectory, so readActivePointer succeeds
+    // and loadActiveTrajectory's replay reaches readConfig -> NOT_INITIALIZED
+    // escapes runHook into the top-level catch.
+    const configPath = path.join(repo, ".waymark", "config.json");
+    fs.rmSync(configPath, { force: true });
+
+    const crash = spawnSync(process.execPath, [hookScript], {
+      input: crashPayload("summary row"),
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    // Exit stays 0 (fail-open), stdout is exactly one JSON line, and the
+    // NOT_INITIALIZED diagnostic went to stderr — proving the throw actually
+    // traversed the top-level catch rather than a silent no-op return.
+    assert.equal(crash.status, 0);
+    const parsedCrash = JSON.parse(crash.stdout) as { context?: string };
+    assert.equal(parsedCrash.context, undefined);
+    assert.match(crash.stdout.trim(), /^\{\}$/);
+    assert.match(crash.stderr, /NOT_INITIALIZED|Run waymark init before using the project/i);
   } finally {
     cleanupTempRepo(repo);
   }

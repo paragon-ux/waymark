@@ -51,65 +51,19 @@ function parseFlags(argv) {
 
 function readStdin() {
   if (process.stdin.isTTY) return Promise.resolve("");
-  return new Promise((resolve) => {
-    let data = "";
-    let ended = false;
-    let settled = false;
-    process.stdin.setEncoding("utf8");
-
-    // Drain quiescence window: resolve only after stdin has gone quiet AND the
-    // pipe is not still open. The pre-2026 design resolved on a bare timer even
-    // with no 'end', which under parallel test load could return an empty read
-    // before the payload was delivered (observed as silent no-ops in CI).
-    let timer = null;
-
-    function settle() {
-      if (timer) clearTimeout(timer);
-      timer = null;
-      cleanup();
-      resolve(data.trim());
-    }
-
-    function armQuiescence(timeoutMs) {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => settle(), timeoutMs);
-    }
-
-    function onData(chunk) {
+  // for-await drains stdin reliably under parallel load: the payload arrives
+  // before 'end' by construction, so no timer can race its first byte into an
+  // empty read (a bare no-data fallback timer did exactly that under full-suite
+  // load). If a writer dies without closing the pipe, Hermes' own hook timeout
+  // bounds the hang — same contract as the reload repo's reference hook.
+  let data = "";
+  process.stdin.setEncoding("utf8");
+  return (async () => {
+    for await (const chunk of process.stdin) {
       data += chunk;
-      // Data flowing means the writer is alive; give it a quiescence window.
-      armQuiescence(50);
     }
-
-    function onEnd() {
-      ended = true;
-      // 'end' after buffered data: settle immediately.
-      settle();
-    }
-
-    function cleanup() {
-      if (timer) clearTimeout(timer);
-      timer = null;
-      process.stdin.removeListener("data", onData);
-      process.stdin.removeListener("end", onEnd);
-      try {
-        process.stdin.pause();
-      } catch {}
-    }
-
-    process.stdin.on("data", onData);
-    process.stdin.on("end", onEnd);
-    process.stdin.resume();
-
-    // No-data guard: if nothing ever arrives (writer died), fall back to empty
-    // after a bounded wait instead of hanging. Not the 100ms-then-maybe-more
-    // race — when data HAS arrived we always wait for 'end'.
-    setTimeout(() => {
-      if (!ended && data === "") {
-        settle();
-      }
-    }, 250);
-  });
+    return data.trim();
+  })();
 }
 
 function parseJsonSafe(raw) {
@@ -181,9 +135,10 @@ function isHermesCompaction(payload) {
 }
 
 function summaryRowIdentity(summaryRow) {
-  if (summaryRow._compressed_summary) {
-    return "metadata";
-  }
+  // Hash the row text for EVERY detected row. The `_compressed_summary` flag is
+  // stamped unconditionally at the boundary (content-independent), so a constant
+  // identity for flagged rows would dedupe two DIFFERENT compactions in one
+  // session against each other and swallow the second boundary within the TTL.
   return crypto.createHash("sha256").update(hermesHistoryText(summaryRow.content)).digest("hex").slice(0, 16);
 }
 
@@ -430,7 +385,10 @@ try {
   await runHook();
   process.exit(0);
 } catch (err) {
-  // Hooks should fail open without blocking host agent loops
+  // Hooks should fail open without blocking host agent loops. Hermes parses
+  // hook stdout as JSON, so even the crash path must answer one JSON line —
+  // empty stdout is logged as "shell hook stdout was not valid JSON".
   process.stderr.write(`[waymark-compact-hook] Error: ${err.message}\n`);
+  process.stdout.write("{}\n");
   process.exit(0);
 }
