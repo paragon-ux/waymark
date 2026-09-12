@@ -318,6 +318,15 @@ export async function extractAstFromRepo(
     allFiles.push(...scanDir(path.join(repoRoot, d)));
   }
 
+  // Load every needed grammar BEFORE parsing. web-tree-sitter compiles a grammar's
+  // wasm lazily per Language.load; loading a grammar while parsed trees from another
+  // language sit on the heap is pathologically slow on some hosts (observed 3-20s for
+  // the python grammar after a single TypeScript parse, vs 5-25ms cold). Concurrent
+  // upfront loads cost ~20-50ms total and keep every subsequent parse in the
+  // millisecond range regardless of host.
+  const neededExts = new Set(allFiles.map((filePath) => path.extname(filePath)));
+  await Promise.all([...neededExts].map((ext) => getLanguageForExtension(ext)));
+
   for (const filePath of allFiles) {
     const ext = path.extname(filePath);
     const lang = await getLanguageForExtension(ext);

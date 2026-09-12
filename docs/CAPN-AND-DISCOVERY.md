@@ -65,6 +65,15 @@ If no structural intent is detected, or if the AST lookup yields no hits:
 2. If charted knowledge exists, the verified answer and file references are returned with `provider: "capn-cli"` and `status: "hit"`.
 3. If neither phase finds a match, a clean, structured `status: "miss"` response is returned without hallucination.
 
+Compatibility notes (verified against capn-hook 0.2.2 on Windows):
+
+- Windows executable resolution prefers the PATHEXT `.cmd`/`.bat`/`.exe` hit; `where.exe` lists the extensionless POSIX shim (`npm\capn`) first, and CreateProcessW cannot execute that shim.
+- `capn chart` is invoked with the capn-hook ≥ 0.2 contract: the answer is passed as `--details`, not a positional.
+- `capn ask` exit code 1 ("No charted answer.") is reported as `status: "miss"`, not `status: "error"` — a charted miss is a normal response.
+- **Lexical recall is the standardized configuration**: run `capn init --no-embedding` (or set `.capn/config.json` to `{"embedding": false}`). With embedding enabled, `capn ask` runs the qmd embedding model — minutes on CPU-only hosts, far beyond the adapter's 15 s timeout. Lexical mode is deterministic, responds in ~1 s, and is what the test suite (`test/capnHarness.mjs`) enforces. Use embedding mode only on GPU hosts where that latency is acceptable.
+- **Grammar pre-warming**: `extractAstFromRepo` loads all grammars the scanned file set needs concurrently *before* parsing. Loading a grammar while parsed trees of another language remain on the heap is pathologically slow on some hosts (observed 3–20 s per `WebAssembly.instantiate` for the python grammar after a TypeScript parse); concurrent upfront loads take ~20–50 ms total.
+- Known host-level limitation (external): a one-shot Node process that ran a tree-sitter parse lingers seconds at process teardown (Emscripten atexit/pthread cleanup; 0% CPU wait) on this class of host. The long-lived MCP server amortizes this across calls; the one-shot CLI's wall clock additionally pays it. In-JS mitigations (`process.exit`, `reallyExit`, `tree.delete()`) do not bypass it — it is downstream of the JavaScript lifecycle.
+
 ---
 
 ## 4. MCP Surface and Usage

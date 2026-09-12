@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { Ajv as AjvClass } from "ajv";
@@ -12,7 +12,7 @@ import { acquireLock, recoverLock } from "../src/lock.js";
 import { initWorkspace, loadActiveTrajectory, readJournalEvents, replayTrajectory, trajectoryPath } from "../src/journal.js";
 import { serializeResume } from "../src/resumeSerializer.js";
 import { stableStringify } from "../src/stableStringify.js";
-import { ask as capnAsk, capnChartArgs, publish as capnPublish } from "../src/capnAdapter.js";
+import { ask as capnAsk, capnChartArgs, publish as capnPublish, resolveWindowsExecutable } from "../src/capnAdapter.js";
 import { checkTrajectory } from "../src/integrity.js";
 
 const cliPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../src/cli.js");
@@ -40,6 +40,43 @@ function makeRepo(files: Record<string, string>): string {
   git(root, ["add", "."]);
   git(root, ["commit", "-qm", "fixture"]);
   return root;
+}
+
+// Resolve the REAL capn CLI surface for adapter tests: a wrapper script that
+// runs test/capnHarness.mjs (actual capn-hook code, lexical recall standardized
+// to embedding: false) with the repo as its cwd. No synthetic adapters.
+// The compiled test lives in dist/test/, but the harness .mjs is a source
+// asset under test/ — resolve relative to the repository root either way.
+const CAPN_HARNESS = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  /^(dist|build)[\\/]/u.test(path.relative(path.resolve(process.cwd()), path.dirname(fileURLToPath(import.meta.url)))) ? "../../test" : "",
+  "capnHarness.mjs",
+);
+
+async function capnTestExecutable(root: string): Promise<string> {
+  // Verify capn-hook is reachable before returning the executable so a missing
+  // install fails with a clear message instead of a confusing adapter error.
+  const probe = spawnSync(process.execPath, [CAPN_HARNESS, "list"], {
+    cwd: root, encoding: "utf8", windowsHide: true, timeout: 30_000,
+  });
+  if (probe.status === 2 || (probe.stderr || "").includes("capnHarness: capn-hook not found")) {
+    throw new Error(`capn-hook is required for capn adapter tests: ${probe.stderr || probe.stdout}`);
+  }
+  if (process.platform === "win32") {
+    // A .cmd wrapper so the adapter's Windows path (cmd.exe /c + quoting) is
+    // the one actually exercised.
+    const cmdPath = path.join(root, "capn.cmd");
+    fs.writeFileSync(
+      cmdPath,
+      ["@echo off", `"${process.execPath}" "${CAPN_HARNESS}" %*`, ""].join("\r\n"),
+      "utf8",
+    );
+    return cmdPath;
+  }
+  const shPath = path.join(root, "capn.sh");
+  fs.writeFileSync(shPath, `#!/bin/sh\nexec "${process.execPath}" "${CAPN_HARNESS}" "$@"\n`, "utf8");
+  fs.chmodSync(shPath, 0o755);
+  return shPath;
 }
 
 function runCli(root: string, args: readonly string[]): CliResult {
@@ -101,37 +138,55 @@ test("resume serializer rejects noncanonical active input instead of emitting in
   }), /question/iu);
 });
 
-test("Capn publication uses the public positional question/answer argv contract", () => {
-  assert.deepEqual(capnChartArgs("question", "answer", ["src/z.ts", "src/a.ts", "src/a.ts"]), ["chart", "question", "answer", "--files", "src/a.ts", "--files", "src/z.ts"]);
+test("Capn publication uses the public question/--details argv contract", () => {
+  // capn-hook >= 0.2 moved the answer from a positional to --details.
+  assert.deepEqual(capnChartArgs("question", "answer", ["src/z.ts", "src/a.ts", "src/a.ts"]), ["chart", "question", "--files", "src/a.ts", "--files", "src/z.ts", "--details", "answer"]);
   assert.throws(() => capnChartArgs("question", "answer", ["src/a,b.ts"]), /comma/iu);
 });
 
 test("Capn ask recognizes the public miss response", async () => {
   const root = makeRepo({ "src/flow.ts": "line\n" });
-  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-  const executable = process.platform === "win32"
-    ? path.join(projectRoot, "test", "fake-capn-miss.cmd")
-    : path.join(root, "fake-capn-miss.mjs");
-  if (process.platform !== "win32") {
-    fs.copyFileSync(path.join(projectRoot, "test", "fake-capn-miss.mjs"), executable);
-    fs.chmodSync(executable, 0o755);
-  }
+  const executable = await capnTestExecutable(root);
   const result = await capnAsk(root, "capn-cli", executable, "question");
   assert.equal(result.status, "miss");
 });
 
-test("capn-cli adapter executes an available command without shell interpolation", { skip: process.platform !== "win32" }, async () => {
+test("Capn ask treats exit code 1 (charted miss) as a miss, not an adapter error", async () => {
+  // Real capn-hook >= 0.2 writes "No charted answer." to stderr and exits 1 on a miss.
+  // The adapter must report status "miss" rather than "error".
   const root = makeRepo({ "src/flow.ts": "line\n" });
-  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-  const result = await capnPublish(root, "capn-cli", path.join(projectRoot, "test", "fake-capn.cmd"), "question", "answer", ["src/flow.ts"], "trajectory-test");
+  const executable = await capnTestExecutable(root);
+  const result = await capnAsk(root, "capn-cli", executable, "another question");
+  assert.equal(result.status, "miss");
+  assert.equal((result as { error?: string }).error, undefined);
+});
+
+test("Windows executable resolution prefers the PATHEXT .cmd over the extensionless POSIX shim", { skip: process.platform !== "win32" }, () => {
+  // where.exe lists `npm\capn` (a bash shim CreateProcessW cannot run) BEFORE
+  // `npm\capn.cmd`; the resolver must pick the .cmd or spawn fails with ENOENT.
+  const resolved = resolveWindowsExecutable("capn");
+  assert.ok(/\.(cmd|bat|exe)$/i.test(resolved), `expected an executable extension, got: ${resolved}`);
+  assert.equal(resolved.toLowerCase().endsWith("capn.cmd"), true, `expected capn.cmd, got: ${resolved}`);
+});
+
+test("capn-cli adapter executes an available command without shell interpolation", async () => {
+  const root = makeRepo({ "src/flow.ts": "line\n" });
+  const executable = await capnTestExecutable(root);
+  const result = await capnPublish(root, "capn-cli", executable, "question", "answer", ["src/flow.ts"], "trajectory-test");
   assert.equal(result.published, true, result.error);
-  assert.match(result.output, /chart question answer --files src\/flow\.ts/u);
+  // The REAL capn-hook ran (recording id printed). Assert the chart actually
+  // landed in the store and carries the details payload.
+  const list = spawnSync(process.execPath, [CAPN_HARNESS, "list"], { cwd: root, encoding: "utf8", windowsHide: true, timeout: 30_000 });
+  const listing = `${list.stdout || ""}\n${result.output}`;
+  assert.match(listing, /chart/iu);
+  assert.match(listing, /Q: question/u);
+  assert.match(listing, /Details:\s*\nanswer/u);
 });
 
 test("Windows batch Capn publication fails closed for command-interpreter percent expansion", { skip: process.platform !== "win32" }, async () => {
   const root = makeRepo({ "src/flow.ts": "line\n" });
-  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-  const result = await capnPublish(root, "capn-cli", path.join(projectRoot, "test", "fake-capn.cmd"), "100%PATH%", "answer", ["src/flow.ts"], "trajectory-test");
+  const executable = await capnTestExecutable(root);
+  const result = await capnPublish(root, "capn-cli", executable, "100%PATH%", "answer", ["src/flow.ts"], "trajectory-test");
   assert.equal(result.published, false);
   assert.match(result.error ?? "", /CAPN_UNSAFE_ARGUMENT/iu);
 });

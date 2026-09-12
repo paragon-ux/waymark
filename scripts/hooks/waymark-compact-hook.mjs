@@ -6,18 +6,36 @@
  * This executable script supports multiple agent harnesses:
  * - OpenAI Codex: Handles SessionStart (compact) JSON-RPC stdin/stdout contracts.
  * - Antigravity (Agy): Handles PreInvocation injectSteps protocol.
+ * - Hermes Agent: Handles pre_llm_call shell-hook payloads (fires only when the
+ *   conversation history shows a compaction handoff and no live user turn).
  * - Claude Code & CLI: Emits clean Markdown or structured JSON.
  *
  * Usage:
- *   node scripts/hooks/waymark-compact-hook.mjs [--format=markdown|json|codex|agy] [--root=<path>]
+ *   node scripts/hooks/waymark-compact-hook.mjs [--format=markdown|json|codex|agy|hermes] [--root=<path>]
  */
 
 import path from "node:path";
+import crypto from "node:crypto";
+import fs from "node:fs";
 import process from "node:process";
 import { readConfig, loadActiveTrajectory, readActivePointer } from "../../dist/src/journal.js";
 import { repoRoot } from "../../dist/src/paths.js";
 import { checkTrajectory } from "../../dist/src/integrity.js";
 import { serializeResume } from "../../dist/src/resumeSerializer.js";
+
+// Hermes compaction markers (agent/context_compressor.py). The summary handoff is a
+// role="user" row starting with one of these prefixes; content markers are byte-pinned
+// upstream ("NEVER edit/reorder entries"). Matched exactly so ordinary turns never fire.
+const HERMES_SUMMARY_PREFIXES = [
+  "[CONTEXT COMPACTION",
+  "[CONTEXT SUMMARY]:",
+];
+const HERMES_MERGED_SUMMARY_DELIMITER = "[END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]";
+const HERMES_CONTINUATION_MARKERS = [
+  "Continue from the compressed conversation context above. This marker exists because no human user turn was available.",
+  "Continue from the compressed conversation context above. This marker exists because the compacted transcript contained no preserved user turn.",
+];
+const HERMES_SUMMARY_HEADING = "## Historical Task Snapshot";
 
 function parseFlags(argv) {
   let format = null;
@@ -29,33 +47,47 @@ function parseFlags(argv) {
   return { format, customRoot };
 }
 
-function readStdin(timeoutMs = 100) {
+function readStdin() {
   if (process.stdin.isTTY) return Promise.resolve("");
   return new Promise((resolve) => {
     let data = "";
+    let ended = false;
+    let settled = false;
     process.stdin.setEncoding("utf8");
 
-    let timer = setTimeout(() => {
+    // Drain quiescence window: resolve only after stdin has gone quiet AND the
+    // pipe is not still open. The pre-2026 design resolved on a bare timer even
+    // with no 'end', which under parallel test load could return an empty read
+    // before the payload was delivered (observed as silent no-ops in CI).
+    let timer = null;
+
+    function settle() {
+      if (timer) clearTimeout(timer);
+      timer = null;
       cleanup();
       resolve(data.trim());
-    }, timeoutMs);
+    }
+
+    function armQuiescence(timeoutMs) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => settle(), timeoutMs);
+    }
 
     function onData(chunk) {
       data += chunk;
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        cleanup();
-        resolve(data.trim());
-      }, 50);
+      // Data flowing means the writer is alive; give it a quiescence window.
+      armQuiescence(50);
     }
 
     function onEnd() {
-      cleanup();
-      resolve(data.trim());
+      ended = true;
+      // 'end' after buffered data: settle immediately.
+      settle();
     }
 
     function cleanup() {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
+      timer = null;
       process.stdin.removeListener("data", onData);
       process.stdin.removeListener("end", onEnd);
       try {
@@ -66,6 +98,15 @@ function readStdin(timeoutMs = 100) {
     process.stdin.on("data", onData);
     process.stdin.on("end", onEnd);
     process.stdin.resume();
+
+    // No-data guard: if nothing ever arrives (writer died), fall back to empty
+    // after a bounded wait instead of hanging. Not the 100ms-then-maybe-more
+    // race — when data HAS arrived we always wait for 'end'.
+    setTimeout(() => {
+      if (!ended && data === "") {
+        settle();
+      }
+    }, 250);
   });
 }
 
@@ -76,6 +117,117 @@ function parseJsonSafe(raw) {
   } catch {
     return null;
   }
+}
+
+function hermesHistoryText(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => (part && typeof part === "object" && typeof part.text === "string" ? part.text : ""))
+      .join("\n");
+  }
+  return "";
+}
+
+// Compaction boundary detection for Hermes pre_llm_call payloads.
+//
+// Hermes compacts at TURN START: the immediate post-compaction turn usually
+// carries a live user message AFTER the summary row, so a live user message
+// does NOT mean the summary is stale. Fire on the first turn whose history
+// contains a compaction handoff, then dedupe on session_id + summary identity
+// so the persisting summary row does not re-trigger every turn.
+function isHermesCompaction(payload) {
+  if (!payload || typeof payload !== "object" || payload.hook_event_name !== "pre_llm_call") {
+    return null;
+  }
+  const history = Array.isArray(payload.extra?.conversation_history) ? payload.extra.conversation_history : [];
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const message = history[index];
+    if (!message || typeof message !== "object") {
+      continue;
+    }
+    // Primary signal: the in-process summary flag (agent/context_compressor.py
+    // stamps `_compressed_summary` on the handoff row unconditionally at the
+    // compaction boundary; content-independent, survives hook stdin
+    // serialization). Verified against Hermes 0.21.2.
+    if (message._compressed_summary) {
+      return { summaryRow: message };
+    }
+    // Fallback signal: byte-pinned content markers, for rows that passed through a
+    // wire sanitizer or session-store round-trip that drops "_"-prefixed metadata.
+    if (message.role !== "user") {
+      continue;
+    }
+    const text = hermesHistoryText(message.content);
+    if (HERMES_SUMMARY_PREFIXES.some((prefix) => text.startsWith(prefix))) {
+      return { summaryRow: message };
+    }
+    if (text.includes(HERMES_MERGED_SUMMARY_DELIMITER)) {
+      const after = text.split(HERMES_MERGED_SUMMARY_DELIMITER, 2)[1] || "";
+      if (HERMES_SUMMARY_PREFIXES.some((prefix) => after.trimStart().startsWith(prefix))) {
+        return { summaryRow: message };
+      }
+    }
+    if (HERMES_CONTINUATION_MARKERS.some((marker) => text.startsWith(marker))) {
+      return { summaryRow: message };
+    }
+    if (text.startsWith(HERMES_SUMMARY_HEADING)) {
+      return { summaryRow: message };
+    }
+  }
+  return null;
+}
+
+function summaryRowIdentity(summaryRow) {
+  if (summaryRow._compressed_summary) {
+    return "metadata";
+  }
+  return crypto.createHash("sha256").update(hermesHistoryText(summaryRow.content)).digest("hex").slice(0, 16);
+}
+
+// Dedupe state lives next to the trajectory (.waymark/) so it is repo-scoped and
+// already covered by the worktree-integrity story. Best-effort: a failed state
+// write only means a possible duplicate injection, never a missed one.
+const DEDUPE_FILENAME = "hermes-compact-hook-state.json";
+
+function hermesStatePath(root) {
+  return path.join(root, ".waymark", DEDUPE_FILENAME);
+}
+
+function shouldFireForCompaction(payload, summaryRow, root) {
+  const sessionId = typeof payload.session_id === "string" && payload.session_id
+    ? payload.session_id
+    : null;
+  if (!sessionId) {
+    return true; // nothing to dedupe against; still a verified compaction turn
+  }
+  const statePath = hermesStatePath(root);
+  let state = {};
+  try {
+    state = JSON.parse(fs.readFileSync(statePath, "utf8"));
+    if (!state || typeof state !== "object") state = {};
+  } catch {
+    state = {};
+  }
+  const key = `${sessionId}:${summaryRowIdentity(summaryRow)}`;
+  const fired = typeof state[key] === "number" ? state[key] : 0;
+  if (fired && Date.now() - fired < 12 * 60 * 60 * 1000) {
+    return false;
+  }
+  state[key] = Date.now();
+  // Prune entries older than 7 days so the file cannot grow unbounded.
+  for (const [k, v] of Object.entries(state)) {
+    if (typeof v === "number" && Date.now() - v > 7 * 24 * 60 * 60 * 1000) {
+      delete state[k];
+    }
+  }
+  try {
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    fs.writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  } catch {
+    // best-effort
+  }
+  return true;
 }
 
 async function runHook() {
@@ -91,12 +243,34 @@ async function runHook() {
     if (stdinPayload.hook_event_name === "SessionStart") {
       effectiveFormat = "codex";
       if (stdinPayload.cwd) resolvedRoot = stdinPayload.cwd;
+    } else if (stdinPayload.hook_event_name === "pre_llm_call") {
+      // Hermes shell hook: fire on the first turn that sees this compaction
+      // handoff (live user message included), dedupe via session+summary state.
+      const detected = isHermesCompaction(stdinPayload);
+      const rootForGate = stdinPayload.cwd || customRoot;
+      let rootCandidate = null;
+      try {
+        rootCandidate = repoRoot(rootForGate);
+      } catch {
+        rootCandidate = null;
+      }
+      if (detected && shouldFireForCompaction(stdinPayload, detected.summaryRow, rootCandidate || rootForGate)) {
+        effectiveFormat = "hermes";
+        if (stdinPayload.cwd) resolvedRoot = stdinPayload.cwd;
+      } else {
+        return;
+      }
     } else if (stdinPayload.workspacePaths || stdinPayload.invocationNum !== undefined) {
       effectiveFormat = "agy";
       if (Array.isArray(stdinPayload.workspacePaths) && stdinPayload.workspacePaths[0]) {
         resolvedRoot = stdinPayload.workspacePaths[0];
       }
     }
+  }
+
+  if (effectiveFormat === "hermes") {
+    // Forced --format=hermes (CLI mode): no compaction gate.
+    effectiveFormat = "hermes-markdown";
   }
 
   if (!effectiveFormat) effectiveFormat = "markdown";

@@ -38,9 +38,9 @@ Agent harnesses provide varying levels of context-injection capability, categori
 
 | Support Tier | Mechanism | Delivery Guarantee | Target Harnesses |
 | :--- | :--- | :--- | :--- |
-| **Tier 1: Active Lifecycle Hook Injection** | Out-of-context process execution on compaction/session boundary. | **100% deterministic.** Context injected before model invocation without spending tokens or turns. | **OpenAI Codex** (`SessionStart` with `source: compact`), **Google Antigravity** (`PreInvocation.injectSteps`), **Claude Code** (`post_compact`). |
-| **Tier 2: MCP Resource & Prompt Ingestion** | In-band Model Context Protocol primitives (`resources/read`, `prompts/get`). | **High reliability.** Standardized pull; model accesses context via subscribed URIs or prompt commands. | **Claude Code**, **Cursor Composer**, **Windsurf**, **Cline**. |
-| **Tier 3: Persistent Prompt Directives** | Sticky system framing files surviving context window compactions. | **Best-effort.** Instructs model to call `waymark_resume()` as step 1 when prior turn history is rolled. | **Cursor** (`.cursor/rules/*.mdc`), **Claude Code** (`CLAUDE.md`), **Antigravity** (`<RULE>` system blocks). |
+| **Tier 1: Active Lifecycle Hook Injection** | Out-of-context process execution on compaction/session boundary. | **100% deterministic.** Context injected before model invocation without spending tokens or turns. | **OpenAI Codex** (`SessionStart` with `source: compact`), **Google Antigravity** (`PreInvocation.injectSteps`), **Claude Code** (`post_compact`), **Hermes Agent** (`pre_llm_call` shell hook, compaction-gated). |
+| **Tier 2: MCP Resource & Prompt Ingestion** | In-band Model Context Protocol primitives (`resources/read`, `prompts/get`). | **High reliability.** Standardized pull; model accesses context via subscribed URIs or prompt commands. | **Claude Code**, **Cursor Composer**, **Windsurf**, **Cline**, **Hermes Agent** (native `mcp_servers`). |
+| **Tier 3: Persistent Prompt Directives** | Sticky system framing files surviving context window compactions. | **Best-effort.** Instructs model to call `waymark_resume()` as step 1 when prior turn history is rolled. | **Cursor** (`.cursor/rules/*.mdc`), **Claude Code** (`CLAUDE.md`), **Antigravity** (`<RULE>` system blocks), **Hermes Agent** (`AGENTS.md` context-file loading). |
 
 ---
 
@@ -174,7 +174,31 @@ Configure in `.gemini/antigravity/` workspace configuration:
 
 ---
 
-### E. Custom Autonomous Agent Loops (Python / Node.js)
+### E. Hermes Agent
+
+[Hermes Agent](https://github.com/NousResearch/hermes-agent) natively supports MCP servers and shell hooks via `~/.hermes/config.yaml`.
+
+#### Tier 2: MCP Server Configuration:
+```yaml
+mcp_servers:
+  waymark:
+    command: "node"
+    args: ["<path-to-waymark>/dist/src/mcp/waymarkIndex.js"]
+```
+
+#### Tier 1: Compaction-Gated Shell Hook:
+```yaml
+hooks:
+  pre_llm_call:
+    - command: "node" "<path-to-waymark>/scripts/hooks/waymark-compact-hook.mjs"
+      timeout: 15
+```
+
+The hook auto-detects Hermes' `pre_llm_call` payload and fires only when the conversation history ends in a Hermes compaction handoff (`[CONTEXT COMPACTION — REFERENCE ONLY]…` summary, the no-user-turn continuation marker, the `## Historical Task Snapshot` fallback, or a merged summary) **and** no live user message is pending; ordinary turns print nothing. It resolves the repository from the payload's `cwd`. Approve the `(pre_llm_call, node)` hook pair on first use (or set `hooks_auto_accept: true` / run `hermes --accept-hooks`), then restart Hermes. See [`harnesses/hermes/README.md`](../harnesses/hermes/README.md) for the complete contract.
+
+---
+
+### F. Custom Autonomous Agent Loops (Python / Node.js)
 
 If you are orchestrating LLM agents with LangGraph, AutoGen, CrewAI, or bespoke loops, bind Waymark directly to your compaction/pruning middleware:
 
@@ -204,4 +228,5 @@ def on_context_compaction(workspace_path: str) -> str:
 | **Claude Code** | `post_compact` hook + `CLAUDE.md` | Process hook + prompt rule | **High (Hook runs on compaction)** |
 | **Cursor** | `.cursor/rules/` (`alwaysApply: true`) | Pre-turn rule injection | **High (Rules re-injected every turn)** |
 | **Antigravity** | Workspace `<RULE>` block | Persistent system prompt | **High (System prompt survives compaction)** |
+| **Hermes Agent** | `pre_llm_call` shell hook + native `mcp_servers` | Process hook (compaction-gated) + MCP | **High (Deterministic on compaction boundary)** |
 | **Custom Loops** | Middleware callback | Application orchestrator | **Absolute (Programmatic injection)** |
